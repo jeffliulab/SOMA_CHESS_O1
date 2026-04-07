@@ -1,4 +1,14 @@
-# Soma Home 仿真到实物：全面 Q&A 指南
+# SmartRobotArm 仿真到实物：硬件 & 仿真 Q&A 指南
+
+> ⚠️ **这份文档是从 `soma_home_exp_v1` 继承的旧版本**，描述的是带 LiDAR + 底盘的 mobile manipulator 硬件方案。
+> v1 实际硬件已改为**固定式机械臂**（无底盘 / 无 LiDAR / 无 Pi 5）。
+>
+> 文档中关于 URDF 验证、4-DOF MoveIt2、感知模型选择、sim-to-real gap 的讨论**仍然有效**；
+> 但所有底盘 / LiDAR / 多机通信相关的内容请视为 v2+ 的参考。
+>
+> v1 真实硬件清单见 [`../开发进度与待办事项.md`](../开发进度与待办事项.md) 中"硬件配置"一节。
+
+---
 
 ---
 
@@ -41,7 +51,7 @@ check_urdf robot.urdf
 urdf_to_graphiz robot.urdf
 
 # 3. 在 RViz2 中交互式查看
-ros2 launch soma_description display.launch.py
+ros2 launch arm_description display.launch.py
 # 拖动 joint_state_publisher_gui 的滑块，确认每个关节运动方向和范围正确
 ```
 

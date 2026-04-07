@@ -93,8 +93,8 @@ datasets/
 *.pcd
 *.ply
 # Keep meshes that ship with the URDF — uncomment to override:
-# !src/soma_description/meshes/**/*.stl
-# !src/soma_description/meshes/**/*.dae
+# !src/arm_description/meshes/**/*.stl
+# !src/arm_description/meshes/**/*.dae
 
 # ------------------------------------------------------------
 # Gazebo / simulation cache

@@ -1,7 +1,12 @@
-# Soma Home EXP v1 — 开发指南
+# SmartRobotArm — 开发指南
 
-> 写给从未搭建过 ROS 2 仿真项目的你。
-> 每个阶段都建立在前一阶段的基础上，请不要跳过任何阶段。
+> ⚠️ **这份文档是从 `soma_home_exp_v1` 继承的旧版本**，描述的是 **mobile manipulation + Nav2 + SLAM** 路线。
+> v1 实际计划已改为**固定式桌面机械臂**（不做 mobile / 不做 Nav2 / 不做 SLAM）。
+>
+> **真正的执行计划**请看 [`../开发进度与待办事项.md`](../开发进度与待办事项.md)（8 周冲刺，是 single source of truth）。
+> 本文档保留是因为 ROS 2 安装、URDF 验证、Gazebo 启动这些基础内容仍然有用，但请把所有 mobile / SLAM / Nav2 相关的章节当作 v2+ 的参考。
+>
+> 写给从未搭建过 ROS 2 项目的你。每个阶段都建立在前一阶段的基础上，请不要跳过任何阶段。
 
 ---
 
@@ -95,7 +100,7 @@ soma_robot
     └── arm_gripper_link（关节4：夹爪开合）
 ```
 
-URDF 文件位于 `src/soma_description/urdf/soma_robot.urdf.xacro`。
+URDF 文件位于 `src/arm_description/urdf/soma_robot.urdf.xacro`。
 
 关键尺寸（来自 RoArm-M2-S 规格书）：
 - 机械臂底座宽度：约 87×91mm
@@ -115,14 +120,14 @@ URDF 中需要配置以下 Gazebo 插件：
 #### 1.3 在 RViz 中验证
 
 ```bash
-ros2 launch soma_description display.launch.py
+ros2 launch arm_description display.launch.py
 # 你应该能在 RViz 中看到机器人模型，并且可以通过滑块控制关节运动
 ```
 
 #### 1.4 在 Gazebo 中加载
 
 ```bash
-ros2 launch soma_description gazebo.launch.py
+ros2 launch arm_description gazebo.launch.py
 # 机器人应该出现在 Gazebo 中，轮子应该能响应以下命令：
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}, angular: {z: 0.0}}"
 ```
@@ -160,7 +165,7 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}, angular: {z:
 
 ```bash
 # 启动仿真环境 + SLAM
-ros2 launch soma_navigation slam.launch.py
+ros2 launch arm_navigation slam.launch.py
 
 # 在另一个终端中，通过键盘遥控机器人来建图
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
@@ -173,7 +178,7 @@ ros2 run nav2_map_server map_saver_cli -f maps/home_map
 
 ```bash
 # 使用保存的地图启动仿真环境 + Nav2
-ros2 launch soma_navigation navigation.launch.py map:=maps/home_map.yaml
+ros2 launch arm_navigation navigation.launch.py map:=maps/home_map.yaml
 
 # 在 RViz 中，使用 "2D Goal Pose" 工具来设定导航目标点
 # 或者通过命令行发送目标：
