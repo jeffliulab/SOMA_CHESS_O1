@@ -35,12 +35,12 @@
 
 SmartRobotArm 是一个语言驱动的真机操作演示。用户说出自然语言指令，由 Claude 驱动的 parser 将其转化为结构化任务规约（TaskSpec）；开放词汇感知（Grounding DINO + SAM2）把语言定位到场景中的物体；模仿学习策略（ACT，通过 LeRobot 在真机 teleop 数据上训练）在 4-DOF 机械臂上执行原语技能；视觉验证器在每一步之后确认结果，再向用户报告。
 
-项目基于开源认知框架 [ANIMA](https://github.com/jeffliulab/ANIMA_O1)——一种以 LLM-as-Parser + 行为树为核心的架构，灵感来自 [DIARC](https://hrilab.tufts.edu/)（Tufts HRI Lab）。
+项目基于开源认知框架 [ANIMA](https://github.com/jeffliulab/ANIMA_O1)——一种以 LLM-as-Parser + 行为树 + test-and-check 验证闭环为核心的架构。
 
 ## 项目亮点
 
 - **语言 → 真机动作的端到端闭环**。说一句 `"把绿色海绵放进盒子"`，系统就能完成语言理解、任务分解、真机执行和视觉验证——全部在一台桌面工作站上完成。
-- **可验证的认知层**。基于开源 ANIMA 框架：LLM-as-Parser（不是 LLM-as-Translator）输出结构化 TaskSpec，py_trees 行为树执行任务，DIARC 风格的 test-and-check 验证器捕获失败并触发自然语言回复。
+- **可验证的认知层**。基于开源 ANIMA 框架：LLM-as-Parser（不是 LLM-as-Translator）输出结构化 TaskSpec，py_trees 行为树执行任务，test-and-check 验证器捕获失败并触发自然语言回复。
 - **真实世界的模仿学习，不是仿真**。在真机上用 LeRobot 采集 teleop 演示，作为公开 LeRobotDataset 发布到 HuggingFace Hub，再训练 ACT (Action Chunking Transformer) 策略，给出每个技能的成功率指标。
 - **开放词汇感知开箱即用**。Grounding DINO + SAM2 把任意文本查询（`"绿色海绵"`、`"空盒子"`）翻译成世界坐标，无需为每个物体单独训练模型。
 - **完全开源**。Apache-2.0 协议，公开数据集 + 公开代码 + 公开模型权重——任何拥有 Logitech C922 和入门级机械臂的人都能复现。
@@ -88,7 +88,7 @@ SmartRobotArm 是一个语言驱动的真机操作演示。用户说出自然语
                       ▼
        ┌─────────────────────────────┐
        │  Test-and-check 验证器       │  基于视觉的执行结果验证
-       │  (DIARC 风格)                │  → 成功 / 重试 / 报告失败
+       │                              │  → 成功 / 重试 / 报告失败
        └─────────────────────────────┘
 ```
 
@@ -213,7 +213,7 @@ ACT 训练的原子技能，作为认知层的可组合积木：
 - → 仍失败
 - → 自然语言报告：*"我试了两次，夹爪都滑了。要不要试试不同角度？"*
 
-Test-and-check 验证闭环来自 [DIARC](https://hrilab.tufts.edu/) 认知架构，是这个项目的差异化特性——目前几乎没有 LLM-on-robot 演示在做这件事。
+Test-and-check 验证闭环是 ANIMA 的标志性特性，也是这个项目的差异化所在——目前几乎没有 LLM-on-robot 演示在做这件事。
 
 ---
 
@@ -282,11 +282,9 @@ usbipd attach --wsl --busid <PDP_GAMEPAD_BUSID>
 
 **作者**：[Jeff Liu Lab](https://jeffliulab.com)——[@jeffliulab](https://github.com/jeffliulab)。
 
-**研究背景**。本项目的认知架构源于作者在 [Tufts HRI Lab](https://hrilab.tufts.edu/)（2024–2025）担任 Research Assistant 期间的工作经验，曾在 Fetch 移动操作机器人上参与 DIARC 认知架构相关研究。本项目区别于其他 LLM-on-robot 演示的两个核心设计——**LLM-as-Parser**（而不是 LLM-as-Translator）和 **test-and-check 验证**——直接来自论文 *"On Evaluating LLM Integration into Robotic Architectures"*（Sarathy 等，ACM TIST 2025）的发现。
-
 **可复用的认知层**。[ANIMA 框架](https://github.com/jeffliulab/ANIMA_O1)作为独立的开源项目维护，可以复用到其他机器人本体上——SmartRobotArm 是它的第一个参考实现。
 
-**长期愿景**。SmartRobotArm 是未来家用机器人系列的机械臂能力层。当前固定式的工作站会在后续版本中集成到 mobile 平台上。
+**长期愿景**。我开发 ANIMA 认知框架的目标，是为最终开发 SOMA 家务机器人服务的——我想做一个能协助做家务的家庭机器人，提升人们的生活幸福感。SmartRobotArm 是这个未来家用机器人的机械臂能力层；当前固定式的工作站会在后续版本中集成到 mobile 平台上。
 
 ---
 

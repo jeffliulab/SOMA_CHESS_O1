@@ -35,12 +35,12 @@
 
 SmartRobotArm is a real-robot demonstration of language-driven manipulation. A user speaks a natural-language instruction; a Claude-based parser turns it into a structured task spec; open-vocabulary perception (Grounding DINO + SAM2) grounds the language to objects in the scene; an imitation-learning policy (ACT, trained on real teleop demos via LeRobot) executes skill primitives on a 4-DOF arm; and a vision-based validator verifies each step before reporting back.
 
-The project is built around the open-source [ANIMA](https://github.com/jeffliulab/ANIMA_O1) cognitive framework — an LLM-as-Parser, behavior-tree-based architecture inspired by [DIARC](https://hrilab.tufts.edu/) (Tufts HRI Lab).
+The project is built around the open-source [ANIMA](https://github.com/jeffliulab/ANIMA_O1) cognitive framework — an LLM-as-Parser, behavior-tree-based architecture with a test-and-check validation loop.
 
 ## Highlights
 
 - **Language → real-robot action loop, end to end.** Speak `"put the green sponge in the bin"` and the system grounds the language, plans the task, executes the skill on real hardware, and verifies success — all on a single workstation.
-- **Cognitive layer with verifiable reasoning.** Built on the open-source ANIMA framework: LLM-as-Parser (not LLM-as-Translator) emits structured TaskSpecs, a py_trees behavior tree executes them, and a DIARC-inspired test-and-check validator catches failures and triggers natural-language recovery.
+- **Cognitive layer with verifiable reasoning.** Built on the open-source ANIMA framework: LLM-as-Parser (not LLM-as-Translator) emits structured TaskSpecs, a py_trees behavior tree executes them, and a test-and-check validator catches failures and triggers natural-language recovery.
 - **Real-world imitation learning, not just simulation.** Teleop demos collected on the actual hardware via LeRobot, published as public LeRobotDataset on HuggingFace Hub, and trained into ACT (Action Chunking Transformer) policies with quantified per-skill success rates.
 - **Open-vocabulary perception out of the box.** Grounding DINO + SAM2 turn arbitrary text queries (`"the green sponge"`, `"the empty bin"`) into world coordinates with no per-object training.
 - **Fully open source.** Apache-2.0, public dataset, public code, public model weights — anyone with a Logitech C922 and a hobby arm can reproduce it.
@@ -88,7 +88,7 @@ The project is built around the open-source [ANIMA](https://github.com/jeffliula
                       ▼
        ┌─────────────────────────────┐
        │  Test-and-check validator   │  vision-based success verification
-       │  (DIARC-inspired)           │  → success / retry / report failure
+       │                             │  → success / retry / report failure
        └─────────────────────────────┘
 ```
 
@@ -213,7 +213,7 @@ The cognitive layer composes primitives into tasks of increasing complexity:
 - → still fails
 - → natural-language report: *"I tried twice and the gripper slipped. Want me to try a different angle?"*
 
-The test-and-check loop is a signature feature of the [DIARC](https://hrilab.tufts.edu/) cognitive architecture and is rare among LLM-on-robot demonstrations.
+The test-and-check loop is a signature feature of ANIMA and is rare among LLM-on-robot demonstrations.
 
 ---
 
@@ -282,11 +282,9 @@ usbipd attach --wsl --busid <PDP_GAMEPAD_BUSID>
 
 **Author**: [Jeff Liu Lab](https://jeffliulab.com) — [@jeffliulab](https://github.com/jeffliulab).
 
-**Research lineage**. The cognitive architecture is informed by the developer's experience as a Research Assistant at the [Tufts HRI Lab](https://hrilab.tufts.edu/) (2024–2025), working with the DIARC cognitive architecture on a Fetch mobile manipulator. The design choices that distinguish this project — **LLM-as-Parser** (rather than LLM-as-Translator) and **test-and-check validation** — are direct applications of findings from *"On Evaluating LLM Integration into Robotic Architectures"* (Sarathy et al., ACM TIST 2025).
-
 **Reusable cognitive layer**. The [ANIMA framework](https://github.com/jeffliulab/ANIMA_O1) is developed as a separate open-source project so it can be reused on other robot embodiments — SmartRobotArm is the first reference implementation.
 
-**Long-term vision**. SmartRobotArm is the manipulator capability layer for a future home robot family. The fixed-station workstation here will eventually be integrated onto a mobile platform.
+**Long-term vision**. The goal of building the ANIMA cognitive framework is to eventually realize the SOMA home robot — a household robot that helps with chores and makes everyday life happier. SmartRobotArm is the manipulator capability layer of that future home robot; the fixed-station workstation here will eventually be integrated onto a mobile platform.
 
 ---
 
