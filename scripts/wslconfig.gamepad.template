@@ -1,0 +1,3 @@
+[wsl2]
+kernel=C:\\Users\\<WINDOWS_USER>\\wsl-kernels\\linux-msft-wsl-<KERNEL_VERSION>-xpad\\bzImage
+kernelModules=C:\\Users\\<WINDOWS_USER>\\wsl-kernels\\linux-msft-wsl-<KERNEL_VERSION>-xpad\\modules.vhdx

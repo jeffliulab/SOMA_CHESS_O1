@@ -162,8 +162,14 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.try_shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

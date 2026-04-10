@@ -108,7 +108,7 @@ ANIMA 四层架构（NLU → Planning → Execution → Policy）是机器人无
 |---|---|
 | **工作站笔记本** | Windows 11 + RTX 4090 Laptop GPU (16 GB VRAM) |
 | **开发环境** | WSL2 + Ubuntu 22.04 + CUDA passthrough |
-| **USB 集成** | `usbipd-win` 把相机、机械臂、手柄直接转发到 WSL2 |
+| **USB 集成** | 长期推荐：`usbipd-win` 把相机、机械臂、手柄直接转发到 WSL2；手柄模式需要自定义 WSL 内核开启 `JOYDEV + XPAD` |
 
 ### 机器人
 
@@ -151,7 +151,7 @@ ANIMA 四层架构（NLU → Planning → Execution → Policy）是机器人无
 | **运动规划** | MoveIt2 (4-DOF, IKFast / BioIK) |
 | **策略学习** | LeRobot ACT (Action Chunking Transformer)，每个原语单独训练 |
 | **硬件驱动** | 自写 Python driver 包装 Waveshare 串口协议，封装为 ROS 2 节点 |
-| **数据采集** | LeRobot teleop pipeline，手柄通过 `pygame` / `python-evdev` 接入 |
+| **数据采集** | LeRobot teleop pipeline；默认手柄路径为 WSL 直通 `evdev`，Windows TCP bridge 保留为回退方案 |
 | **数据集格式** | LeRobotDataset，发布到 HuggingFace Hub |
 | **中间件** | ROS 2 Humble Hawksbill（单机部署） |
 | **验证用仿真** | Gazebo（URDF 可视化 + 认知层干跑） |
@@ -281,6 +281,25 @@ usbipd attach --wsl --busid <C922_BUSID>
 usbipd attach --wsl --busid <ROARM_BUSID>
 usbipd attach --wsl --busid <PDP_GAMEPAD_BUSID>
 ```
+
+### 长期推荐的手柄方案（WSL 直通）
+
+仓库内已经补齐这条路线需要的脚本与文档：
+
+- `scripts/build_wsl_gamepad_kernel.sh`：构建与当前 WSL 版本匹配、开启 `JOYDEV + XPAD` 的自定义内核
+- `scripts/attach_devices.bat`：Windows 侧一键把机械臂 + 手柄 attach 到 WSL
+- `scripts/check_wsl_gamepad_support.sh`：检查当前内核是否真的具备手柄支持
+- `scripts/start_teleop_wsl_gamepad.sh`：直接以 Linux 本地模式启动 teleop（`use_tcp_bridge:=false`）
+- `docs/WSL_Xbox手柄直通.md`：完整实施指南
+
+这条路线的关键优点是：手柄 attached 到 WSL 之后，Windows 将不再使用它，因此不会再干扰 Windows Terminal 或其他 UI。旧的 Windows bridge 备选方案已整理到 `scripts/bridge方案/` 下。
+
+当前默认 teleop 版本（2026-04-10 锁定）：
+
+- `evdev` 是默认 Linux 输入后端
+- 左摇杆使用硬单轴锁定，专门抑制这只手柄本身的串轴问题
+- 默认关闭 motion smoothing：摇杆大小直接映射关节速度
+- 纯夹爪动作走独立 `/gripper_command`，底层使用协议 `T:106`，不再重发整臂 `T:102`
 
 ---
 

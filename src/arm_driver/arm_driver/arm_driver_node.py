@@ -80,6 +80,7 @@ class ArmDriverNode(Node):
         # ---------- state ----------
         # Last commanded URDF-convention joint positions (preserved between partial commands)
         self._last_cmd: List[float] = list(HOME_POSE)
+        self._latest_state: List[float] | None = None
         self._cmd_lock = threading.Lock()
 
         # ---------- publishers ----------
@@ -88,6 +89,7 @@ class ArmDriverNode(Node):
         # ---------- subscribers ----------
         self.create_subscription(JointState, "/joint_command", self._on_joint_command, 10)
         self.create_subscription(Float32, "/gripper_command", self._on_gripper_command, 10)
+        self.create_subscription(Float32, "/led_command", self._on_led_command, 10)
 
         # ---------- polling timer ----------
         period = 1.0 / max(1.0, rate)
@@ -112,6 +114,8 @@ class ArmDriverNode(Node):
         msg.name = list(URDF_JOINT_NAMES)
         msg.position = list(state.joint_positions())
         msg.effort = [state.tor_base, state.tor_shoulder, state.tor_elbow, state.tor_hand]
+        with self._cmd_lock:
+            self._latest_state = list(msg.position)
         self.joint_states_pub.publish(msg)
 
     # ----------------------------------------------------------------
@@ -149,15 +153,22 @@ class ArmDriverNode(Node):
         except Exception as e:
             self.get_logger().error(f"set_joints_urdf failed: {e}")
 
+    def _on_led_command(self, msg: Float32) -> None:
+        try:
+            self.arm.set_led(float(msg.data))
+        except Exception as e:
+            self.get_logger().error(f"set_led failed: {e}")
+
     def _on_gripper_command(self, msg: Float32) -> None:
-        # Only move the gripper, preserve other joint targets
+        # Use the arm's dedicated EOAT command so pure gripper control does not
+        # resend a full-body T:102 target and disturb the other joints.
         with self._cmd_lock:
             self._last_cmd[3] = float(msg.data)
             self._last_cmd = clamp_urdf(self._last_cmd)
         try:
-            self.arm.set_joints_urdf(*self._last_cmd)
+            self.arm.set_gripper_urdf(self._last_cmd[3])
         except Exception as e:
-            self.get_logger().error(f"set_joints_urdf (gripper) failed: {e}")
+            self.get_logger().error(f"set_gripper_urdf failed: {e}")
 
     # ----------------------------------------------------------------
     # Shutdown
@@ -183,8 +194,14 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.try_shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

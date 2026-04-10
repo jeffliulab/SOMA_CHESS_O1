@@ -13,7 +13,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
-    install_requires=['setuptools', 'pygame'],
+    install_requires=['setuptools', 'pygame', 'evdev'],
     zip_safe=True,
     maintainer='Jeff Liu Lab',
     maintainer_email='jeff@jeffliulab.com',

@@ -17,11 +17,15 @@ T-code cheatsheet (only the ones we use; full list at the Waveshare wiki):
         Set all four joint angles at once. Angles in radians.
         spd = 0 means "use default servo speed". acc = 10 is a gentle accel.
 
+    {"T": 106, "cmd": h, "spd": 0, "acc": 10}
+        Set only the clamp / wrist joint angle. Angles in radians in the
+        hardware frame, same convention as the `hand` field in T:102.
+
     {"T": 105}
         Query current state. Arm responds with one {"T": 1051, ...} line.
 
     {"T": 114, "led": value}
-        Control the onboard LED (0.0 - 1.0 or integer 0-255).
+        Control the onboard LED (0.0 - 1.0 or integer 0-255). ✓ verified 2026-04-08.
 
   Incoming (arm -> host)
     {"T": 1051, "x": <mm>, "y": <mm>, "z": <mm>,
@@ -189,6 +193,11 @@ class RoArmProtocol:
         b, s, e, t = urdf_to_hw(base, shoulder, elbow, hand)
         self._send({"T": 102, "base": b, "shoulder": s, "elbow": e, "hand": t,
                     "spd": spd, "acc": acc})
+
+    def set_gripper_urdf(self, hand: float, spd: int = 0, acc: int = 10) -> None:
+        """Set only the clamp / wrist joint target in URDF-positive convention."""
+        _b, _s, _e, t = urdf_to_hw(0.0, 0.0, 0.0, hand)
+        self._send({"T": 106, "cmd": t, "spd": spd, "acc": acc})
 
     def query_state(self) -> None:
         """Ask the arm to report current state (T:105). Response arrives as T:1051."""

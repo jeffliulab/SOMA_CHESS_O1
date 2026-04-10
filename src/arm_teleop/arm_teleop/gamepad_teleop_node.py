@@ -1,222 +1,279 @@
-"""Gamepad (PDP Xbox) teleoperation of RoArm-M2-S.
+"""Gamepad teleoperation of RoArm-M2-S.
 
-Reads the Linux joystick device via `pygame.joystick`, integrates stick
-velocities into joint target positions at 50 Hz, clamps to URDF joint limits,
-and publishes `/joint_command` (sensor_msgs/JointState) to be consumed by the
-`arm_driver` node.
+Primary workflow:
+  - Xbox/PDP controller is attached directly into WSL via usbipd-win
+  - Linux reads the controller from `/dev/input/event*`
+  - `evdev` normalizes raw events into a canonical `GamepadState`
+  - teleop integrates that state into a single joint target vector and
+    publishes `/joint_command`
 
-Control mapping (PDP Wired Controller for Xbox, XInput via Linux `xpad`):
+Fallback workflow:
+  - keep the controller on Windows
+  - run `scripts/bridge方案/bridge_gui.py`
+  - launch with `use_tcp_bridge:=true`
 
-    Left stick X      -> base yaw        (joint 0, base_link_to_link1)
-    Left stick Y      -> shoulder pitch  (joint 1, link1_to_link2)
-    Right stick X     -> elbow pitch     (joint 2, link2_to_link3)
-    Right stick Y     -> wrist / hand    (joint 3, link3_to_gripper_link)
-    LB (button)       -> gripper close
-    RB (button)       -> gripper open
-    LT (analog axis)  -> close speed multiplier
-    RT (analog axis)  -> open  speed multiplier
-    Start button      -> go home pose
-    Back/Select btn   -> emergency stop (zero all velocities, hold pose)
+Visible control mapping is the same across backends:
 
-pygame axis/button indices are NOT a standard across all controllers, so on
-startup the node prints every axis/button id it finds and uses parameters
-(default values below) to decide which ids drive which joint. Override via ROS
-parameters if the defaults don't match your gamepad — see `jstest /dev/input/js0`.
+    Left stick X      -> base yaw
+    Left stick Y      -> shoulder
+    Right stick Y     -> elbow
+    LB or RB          -> gripper close
+    LT or RT          -> gripper open
+    Start             -> re-enable + go home
+    Back              -> emergency stop
+    DPAD left/right   -> LED brightness
 """
 
 from __future__ import annotations
 
-import os
 import time
 
-import pygame
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float32
 
 from arm_driver.roarm_protocol import URDF_JOINT_NAMES, clamp_urdf
 
+from .control_filters import SlewRateLimiter
+from .gamepad_input import (
+    DEFAULT_DEAD_ZONE,
+    DEFAULT_TRIGGER_THRESHOLD,
+    TeleopInputFilter,
+    create_backend,
+)
 
-# Default axis / button mapping for a standard XInput Xbox pad on Linux xpad.
-# These may differ on a PDP controller — override via ROS parameters if needed.
-DEFAULT_AXIS_LEFT_X = 0
-DEFAULT_AXIS_LEFT_Y = 1
-DEFAULT_AXIS_RIGHT_X = 3
-DEFAULT_AXIS_RIGHT_Y = 4
-DEFAULT_AXIS_LT = 2
-DEFAULT_AXIS_RT = 5
-DEFAULT_BUTTON_LB = 4
-DEFAULT_BUTTON_RB = 5
-DEFAULT_BUTTON_START = 7
-DEFAULT_BUTTON_SELECT = 6
 
-# Initial home pose (radians, URDF convention): all zero + gripper half-open
 HOME_POSE = [0.0, 0.0, 1.5708, 0.75]
 
-# Stick dead-zone — values below this magnitude are treated as 0
-DEAD_ZONE = 0.15
+DEAD_ZONE = DEFAULT_DEAD_ZONE
+TRIGGER_THRESHOLD = DEFAULT_TRIGGER_THRESHOLD
+LED_STEP = 0.1
 
-# Velocity gains: how many rad/sec each axis can drive its joint at full deflection
-MAX_VEL_BASE = 1.2      # rad/s
-MAX_VEL_SHOULDER = 0.9  # rad/s
-MAX_VEL_ELBOW = 1.0     # rad/s
-MAX_VEL_HAND = 0.8      # rad/s (wrist / also used as direct if you disable gripper buttons)
-
-# Gripper: buttons + triggers drive the gripper independently of the right-Y axis.
-GRIPPER_BASE_SPEED = 1.0   # rad/s when only LB/RB pressed, no trigger
-GRIPPER_TRIGGER_SCALE = 1.5  # extra multiplier at full LT/RT pull
-
-CONTROL_HZ = 50
-
-
-def deadzone(v: float, dz: float = DEAD_ZONE) -> float:
-    return 0.0 if abs(v) < dz else v
+MAX_VEL_BASE = 1.2
+MAX_VEL_SHOULDER = 0.9
+MAX_VEL_ELBOW = 1.0
+BASE_ACCEL_RATE = 3.0
+BASE_DECEL_RATE = 7.0
+SHOULDER_ACCEL_RATE = 2.5
+SHOULDER_DECEL_RATE = 6.0
+ELBOW_ACCEL_RATE = 2.5
+ELBOW_DECEL_RATE = 6.0
+GRIPPER_BASE_SPEED = 1.0
+GRIPPER_TRIGGER_SCALE = 1.5
+CONTROL_HZ = 50.0
+ENABLE_MOTION_SMOOTHING = False
 
 
 class GamepadTeleopNode(Node):
     def __init__(self) -> None:
         super().__init__("gamepad_teleop")
 
-        # Parameters
         self.declare_parameter("device_index", 0)
-        self.declare_parameter("axis_left_x", DEFAULT_AXIS_LEFT_X)
-        self.declare_parameter("axis_left_y", DEFAULT_AXIS_LEFT_Y)
-        self.declare_parameter("axis_right_x", DEFAULT_AXIS_RIGHT_X)
-        self.declare_parameter("axis_right_y", DEFAULT_AXIS_RIGHT_Y)
-        self.declare_parameter("axis_lt", DEFAULT_AXIS_LT)
-        self.declare_parameter("axis_rt", DEFAULT_AXIS_RT)
-        self.declare_parameter("button_lb", DEFAULT_BUTTON_LB)
-        self.declare_parameter("button_rb", DEFAULT_BUTTON_RB)
-        self.declare_parameter("button_start", DEFAULT_BUTTON_START)
-        self.declare_parameter("button_select", DEFAULT_BUTTON_SELECT)
+        self.declare_parameter("dead_zone", DEAD_ZONE)
+        self.declare_parameter("trigger_threshold", TRIGGER_THRESHOLD)
+        self.declare_parameter("control_hz", CONTROL_HZ)
+        self.declare_parameter("enable_motion_smoothing", ENABLE_MOTION_SMOOTHING)
+        self.declare_parameter("base_accel_rate", BASE_ACCEL_RATE)
+        self.declare_parameter("base_decel_rate", BASE_DECEL_RATE)
+        self.declare_parameter("shoulder_accel_rate", SHOULDER_ACCEL_RATE)
+        self.declare_parameter("shoulder_decel_rate", SHOULDER_DECEL_RATE)
+        self.declare_parameter("elbow_accel_rate", ELBOW_ACCEL_RATE)
+        self.declare_parameter("elbow_decel_rate", ELBOW_DECEL_RATE)
+        self.declare_parameter("input_backend", "evdev")
+        self.declare_parameter("event_device_path", "")
+        self.declare_parameter("use_tcp_bridge", False)
+        self.declare_parameter("tcp_bridge_host", "127.0.0.1")
+        self.declare_parameter("tcp_bridge_port", 65432)
 
         p = self.get_parameter
-        self._ax = (
-            p("axis_left_x").value,
-            p("axis_left_y").value,
-            p("axis_right_x").value,
-            p("axis_right_y").value,
-            p("axis_lt").value,
-            p("axis_rt").value,
-        )
-        self._bt = (
-            p("button_lb").value,
-            p("button_rb").value,
-            p("button_start").value,
-            p("button_select").value,
-        )
+        self._dead_zone = float(p("dead_zone").value)
+        self._trigger_threshold = float(p("trigger_threshold").value)
+        self._control_hz = max(1.0, float(p("control_hz").value))
+        self._enable_motion_smoothing = bool(p("enable_motion_smoothing").value)
+        self._base_accel_rate = float(p("base_accel_rate").value)
+        self._base_decel_rate = float(p("base_decel_rate").value)
+        self._shoulder_accel_rate = float(p("shoulder_accel_rate").value)
+        self._shoulder_decel_rate = float(p("shoulder_decel_rate").value)
+        self._elbow_accel_rate = float(p("elbow_accel_rate").value)
+        self._elbow_decel_rate = float(p("elbow_decel_rate").value)
+        self._input_backend = str(p("input_backend").value).strip() or "evdev"
+        self._event_device_path = str(p("event_device_path").value).strip()
+        self._use_tcp_bridge = bool(p("use_tcp_bridge").value)
+        self._tcp_bridge_host = str(p("tcp_bridge_host").value)
+        self._tcp_bridge_port = int(p("tcp_bridge_port").value)
+        self._device_index = int(p("device_index").value)
 
-        # Init pygame joystick
-        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")  # headless
-        pygame.init()
-        pygame.joystick.init()
-        if pygame.joystick.get_count() == 0:
-            self.get_logger().error("No joystick found. Did you forward /dev/input/js0 via usbipd?")
-            raise RuntimeError("no joystick")
+        if self._use_tcp_bridge and self._input_backend != "tcp_bridge":
+            self.get_logger().info(
+                "use_tcp_bridge:=true requested — forcing input_backend=tcp_bridge."
+            )
+            self._input_backend = "tcp_bridge"
 
-        dev_idx = p("device_index").value
-        self.js = pygame.joystick.Joystick(dev_idx)
-        self.js.init()
-        self.get_logger().info(
-            f"Opened joystick '{self.js.get_name()}' "
-            f"(axes={self.js.get_numaxes()}, buttons={self.js.get_numbuttons()}, "
-            f"hats={self.js.get_numhats()})"
+        self._backend = create_backend(
+            self._input_backend,
+            self.get_logger(),
+            device_index=self._device_index,
+            event_device_path=self._event_device_path,
+            tcp_bridge_host=self._tcp_bridge_host,
+            tcp_bridge_port=self._tcp_bridge_port,
         )
+        self._input_filter = TeleopInputFilter(
+            dead_zone=self._dead_zone,
+            trigger_threshold=self._trigger_threshold,
+        )
+        self._base_limiter = SlewRateLimiter(self._base_accel_rate, self._base_decel_rate)
+        self._shoulder_limiter = SlewRateLimiter(
+            self._shoulder_accel_rate, self._shoulder_decel_rate
+        )
+        self._elbow_limiter = SlewRateLimiter(self._elbow_accel_rate, self._elbow_decel_rate)
 
-        # Publisher
         self.cmd_pub = self.create_publisher(JointState, "/joint_command", 10)
+        self.gripper_pub = self.create_publisher(Float32, "/gripper_command", 10)
+        self.led_pub = self.create_publisher(Float32, "/led_command", 10)
+        self.create_subscription(JointState, "/joint_states", self._on_joint_states, 10)
 
-        # Target state (URDF convention): [base, shoulder, elbow, hand]
         self._target = list(HOME_POSE)
-        self._estop = False
-        self._last_tick = time.time()
+        self._current_joint_state: list[float] | None = None
+        self._target_initialized = False
         self._last_pub_target = list(self._target)
+        self._last_tick = time.time()
+        self._estop = False
+        self._led_level = 0.5
+        self._prev_start = False
+        self._prev_back = False
+        self._prev_dpad_left = False
+        self._prev_dpad_right = False
 
-        # First publish so arm_driver gets an initial pose
-        self._publish_target()
-
-        # Control loop timer
-        self.create_timer(1.0 / CONTROL_HZ, self._tick)
-
+        self.create_timer(1.0 / self._control_hz, self._tick)
         self.get_logger().info(
-            "Teleop ready. Left stick=base/shoulder, Right stick=elbow/hand, "
-            "LB/RB=gripper, LT/RT=grip speed, Start=home, Back=emergency stop."
+            f"Teleop ready with backend={self._input_backend}. "
+            "Waiting for /joint_states before taking control. "
+            "Left=base/shoulder, Right=elbow, LB/RB=gripper close, "
+            "LT/RT=gripper open, Start=home, Back=e-stop. "
+            f"motion_smoothing={'on' if self._enable_motion_smoothing else 'off'}."
         )
 
-    # ----------------------------------------------------------------
+    def _on_joint_states(self, msg: JointState) -> None:
+        if not msg.name or not msg.position:
+            return
+        try:
+            indices = {name: i for i, name in enumerate(msg.name)}
+            current = [float(msg.position[indices[name]]) for name in URDF_JOINT_NAMES]
+        except KeyError:
+            return
+
+        self._current_joint_state = current
+        if not self._target_initialized:
+            self._target = list(current)
+            self._last_pub_target = list(current)
+
+    def _ensure_target_initialized(self) -> bool:
+        if self._target_initialized:
+            return True
+        if self._current_joint_state is None:
+            self.get_logger().warn(
+                "Teleop input ignored: waiting for first /joint_states sample from arm_driver."
+            )
+            return False
+        self._target = list(self._current_joint_state)
+        self._last_pub_target = list(self._current_joint_state)
+        self._target_initialized = True
+        self.get_logger().info("Teleop target initialized from current /joint_states.")
+        return True
+
     def _tick(self) -> None:
-        pygame.event.pump()
         now = time.time()
         dt = max(0.001, now - self._last_tick)
         self._last_tick = now
 
-        try:
-            lx = deadzone(self.js.get_axis(self._ax[0]))
-            ly = deadzone(self.js.get_axis(self._ax[1]))
-            rx = deadzone(self.js.get_axis(self._ax[2]))
-            ry = deadzone(self.js.get_axis(self._ax[3]))
-            # Triggers on Linux XInput usually rest at -1.0 (unpressed) to +1.0 (fully pulled).
-            # Remap to [0, 1].
-            lt_raw = self.js.get_axis(self._ax[4])
-            rt_raw = self.js.get_axis(self._ax[5])
-            lt = max(0.0, (lt_raw + 1.0) * 0.5)
-            rt = max(0.0, (rt_raw + 1.0) * 0.5)
-
-            lb = bool(self.js.get_button(self._bt[0]))
-            rb = bool(self.js.get_button(self._bt[1]))
-            btn_start = bool(self.js.get_button(self._bt[2]))
-            btn_back = bool(self.js.get_button(self._bt[3]))
-        except pygame.error as e:
-            self.get_logger().warn(f"pygame read error: {e}")
+        raw_state = self._backend.read()
+        if raw_state is None:
             return
-        except IndexError:
-            self.get_logger().warn_once(
-                "Axis/button index out of range — check your gamepad mapping parameters."
-            ) if hasattr(self.get_logger(), "warn_once") else self.get_logger().warn(
-                "Axis/button index out of range — check your gamepad mapping parameters."
-            )
-            return
+        state = self._input_filter.process(raw_state)
 
-        # Emergency stop (press Back/Select): freeze target and ignore further sticks
-        if btn_back:
+        if state.dpad_right and not self._prev_dpad_right:
+            self._led_level = min(1.0, self._led_level + LED_STEP)
+            self.led_pub.publish(Float32(data=self._led_level))
+            self.get_logger().info(f"LED brightness: {self._led_level:.1f}")
+        if state.dpad_left and not self._prev_dpad_left:
+            self._led_level = max(0.0, self._led_level - LED_STEP)
+            self.led_pub.publish(Float32(data=self._led_level))
+            self.get_logger().info(f"LED brightness: {self._led_level:.1f}")
+
+        if state.back and not self._prev_back:
             if not self._estop:
-                self.get_logger().warn("EMERGENCY STOP (Back button)")
+                self.get_logger().warn("EMERGENCY STOP — press Start (≡) to recover")
             self._estop = True
+            self._remember_buttons(state)
             return
-        # Start button re-enables and sends home pose
-        if btn_start:
-            if self._estop:
-                self.get_logger().info("Re-enabled (Start button), going home")
+
+        if state.start and not self._prev_start:
+            if not self._ensure_target_initialized():
+                self._remember_buttons(state)
+                return
+            self.get_logger().info("Start pressed — re-enabled, going home")
             self._estop = False
+            self._reset_motion_limiters()
             self._target = list(HOME_POSE)
             self._publish_target()
+            self._remember_buttons(state)
             return
 
         if self._estop:
+            self._reset_motion_limiters()
+            self._remember_buttons(state)
             return
 
-        # Integrate stick velocities into target joint positions
-        # Note: stick Y axes are inverted on pygame (up = -1)
-        self._target[0] += lx * MAX_VEL_BASE * dt
-        self._target[1] += (-ly) * MAX_VEL_SHOULDER * dt
-        self._target[2] += rx * MAX_VEL_ELBOW * dt
-        self._target[3] += (-ry) * MAX_VEL_HAND * dt
+        desired_base_vel = state.left_x * MAX_VEL_BASE
+        desired_shoulder_vel = (-state.left_y) * MAX_VEL_SHOULDER
+        desired_elbow_vel = state.right_y * MAX_VEL_ELBOW
+        if self._enable_motion_smoothing:
+            base_vel = self._base_limiter.step(desired_base_vel, dt)
+            shoulder_vel = self._shoulder_limiter.step(desired_shoulder_vel, dt)
+            elbow_vel = self._elbow_limiter.step(desired_elbow_vel, dt)
+        else:
+            base_vel = desired_base_vel
+            shoulder_vel = desired_shoulder_vel
+            elbow_vel = desired_elbow_vel
 
-        # Gripper LB/RB with LT/RT speed scaling
-        grip_speed = GRIPPER_BASE_SPEED
-        if lb:  # close
-            self._target[3] -= grip_speed * (1.0 + GRIPPER_TRIGGER_SCALE * lt) * dt
-        if rb:  # open
-            self._target[3] += grip_speed * (1.0 + GRIPPER_TRIGGER_SCALE * rt) * dt
+        arm_motion_requested = any(
+            abs(v) > 1e-6 for v in (base_vel, shoulder_vel, elbow_vel)
+        )
+        gripper_open = max(state.lt, state.rt)
+        gripper_requested = state.lb or state.rb or gripper_open > 0.0
+        if (arm_motion_requested or gripper_requested) and not self._ensure_target_initialized():
+            self._remember_buttons(state)
+            return
 
-        # Clamp to joint limits
-        self._target = clamp_urdf(self._target)
+        if arm_motion_requested:
+            self._target[0] += base_vel * dt
+            self._target[1] += shoulder_vel * dt
+            self._target[2] += elbow_vel * dt
 
-        # Only publish if something actually changed (avoids flooding at rest)
-        if self._target != self._last_pub_target:
-            self._publish_target()
+            self._apply_gripper_delta(state, gripper_open, dt)
+            self._target = clamp_urdf(self._target)
+            if self._target != self._last_pub_target:
+                self._publish_target()
+        elif gripper_requested:
+            # Keep teleop's body target aligned to the latest measured pose so
+            # returning from a gripper-only gesture does not resurrect an older
+            # base/shoulder/elbow target.
+            if self._current_joint_state is not None:
+                self._target[:3] = self._current_joint_state[:3]
+            self._apply_gripper_delta(state, gripper_open, dt)
+            self._target = clamp_urdf(self._target)
+            if self._target[3] != self._last_pub_target[3]:
+                self._publish_gripper_target()
 
-    # ----------------------------------------------------------------
+        self._remember_buttons(state)
+
+    def _remember_buttons(self, state) -> None:
+        self._prev_start = state.start
+        self._prev_back = state.back
+        self._prev_dpad_left = state.dpad_left
+        self._prev_dpad_right = state.dpad_right
+
     def _publish_target(self) -> None:
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -225,11 +282,26 @@ class GamepadTeleopNode(Node):
         self.cmd_pub.publish(msg)
         self._last_pub_target = list(self._target)
 
-    # ----------------------------------------------------------------
+    def _publish_gripper_target(self) -> None:
+        self.gripper_pub.publish(Float32(data=float(self._target[3])))
+        self._last_pub_target[3] = self._target[3]
+
+    def _apply_gripper_delta(self, state, gripper_open: float, dt: float) -> None:
+        if state.lb or state.rb:
+            self._target[3] -= GRIPPER_BASE_SPEED * dt
+        elif gripper_open > 0.0:
+            self._target[3] += (
+                GRIPPER_BASE_SPEED * (1.0 + GRIPPER_TRIGGER_SCALE * gripper_open) * dt
+            )
+
+    def _reset_motion_limiters(self) -> None:
+        self._base_limiter.reset()
+        self._shoulder_limiter.reset()
+        self._elbow_limiter.reset()
+
     def destroy_node(self) -> bool:
         try:
-            pygame.joystick.quit()
-            pygame.quit()
+            self._backend.close()
         except Exception:
             pass
         return super().destroy_node()
@@ -239,17 +311,23 @@ def main(args=None) -> None:
     rclpy.init(args=args)
     try:
         node = GamepadTeleopNode()
-    except Exception as e:
-        print(f"[gamepad_teleop_node] startup failed: {e}")
-        rclpy.shutdown()
+    except Exception as exc:
+        print(f"[gamepad_teleop_node] startup failed: {exc}")
+        rclpy.try_shutdown()
         return
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.try_shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

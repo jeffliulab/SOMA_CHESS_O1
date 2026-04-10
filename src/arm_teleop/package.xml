@@ -13,6 +13,7 @@
   <depend>arm_driver</depend>
 
   <exec_depend>python3-pygame</exec_depend>
+  <exec_depend>python3-evdev</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

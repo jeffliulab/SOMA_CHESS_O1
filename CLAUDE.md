@@ -37,7 +37,7 @@ This is a **portfolio / job-hunting project**, public Apache-2.0, written by Jef
 - **Host**: Windows 11 (user's primary OS, GPU known to perform at full capacity here)
 - **Dev**: WSL2 + Ubuntu 22.04 — chosen over dual-boot Linux because the user's hardware suffers GPU performance loss on dual-boot. WSL2 + CUDA passthrough preserves full RTX 4090 Laptop performance.
 - **Python venv**: `~/SOMA/SOMA_CHESS_O1/.venv/`, created with `python3 -m venv --system-site-packages .venv`. The `--system-site-packages` flag is **mandatory** so the venv can import the system `rclpy` from `/opt/ros/humble/...`. LeRobot, pygame, pyserial, torch (with CUDA) are installed inside this venv.
-- **USB**: `usbipd-win` forwards RoArm (busid `1-4`, CP2102N), PDP gamepad (busid `1-3`), and C922 (TBD) to WSL2 as `/dev/ttyUSB0`, `/dev/input/js0`, `/dev/video0`. **Each Windows reboot needs a fresh `usbipd attach`** — see [scripts/attach_devices.bat](scripts/attach_devices.bat).
+- **USB**: Long-term recommended path is `usbipd-win` forwarding RoArm (busid `1-4`, CP2102N), PDP gamepad (busid `1-3`), and optionally C922 into WSL2 as `/dev/ttyUSB*`, `/dev/input/event*`, `/dev/video*`. This requires a custom WSL kernel with `JOYDEV + XPAD`; see [docs/WSL_Xbox手柄直通.md](docs/WSL_Xbox手柄直通.md) and [scripts/attach_devices.bat](scripts/attach_devices.bat). The Windows TCP bridge remains a fallback only.
 - **ROS 2**: Humble Hawksbill (LTS, best LeRobot compat). MoveIt2 installed via `apt install ros-humble-moveit`. Note: must `apt install --only-upgrade ros-humble-ompl` to get OMPL 1.7.0+ (provides `libompl.so.18`), otherwise `move_group` segfaults — known ROS Humble apt packaging mismatch.
 - **Graphics**: WSLg (Gazebo / RViz2 work but slower — fine since they're not the bottleneck)
 - **Shell helper**: `srarm` function in `~/.bashrc` — one command to enter dev mode (cd into workspace + source ROS 2 + activate venv + source overlay)
@@ -55,7 +55,14 @@ SOMA_CHESS_O1/
 │   ├── FAQ-硬件与仿真.md
 │   └── 机械臂技术文档.md   # RoArm-M2-S 协议 + ROS 2 接口 + 安全操作(W1.5 产物)
 ├── scripts/
-│   └── attach_devices.bat   # Windows-side usbipd attach script (RoArm + gamepad)
+│   ├── attach_devices.bat   # Windows-side usbipd attach script (RoArm + gamepad direct to WSL)
+│   ├── build_wsl_gamepad_kernel.sh
+│   ├── check_wsl_gamepad_support.sh
+│   ├── start_teleop_wsl_gamepad.sh
+│   └── bridge方案/
+│       ├── attach_devices_bridge_mode.bat
+│       ├── bridge_gui.py, bridge_worker.py
+│       └── gamepad_bridge.py, start_bridge.bat
 └── src/                     # ROS 2 workspace, build with colcon
     ├── anima_node/          # ANIMA cognitive layer ROS 2 wrapper (legacy from soma_home_exp_v1)
     ├── arm_description/     # URDF + Gazebo verification scene
@@ -66,7 +73,9 @@ SOMA_CHESS_O1/
     │                        #   - moveit_bridge_node    bridges MoveIt2 mock joint_states to real serial
     │                        #   - probe                 standalone CLI for protocol smoke test
     └── arm_teleop/          # ★ W1.7: PDP Xbox gamepad teleoperation
-        └── gamepad_teleop_node  reads /dev/input/js0 via pygame, publishes /joint_command @ 50 Hz
+        ├── gamepad_input.py      unified GamepadState + evdev/tcp_bridge/pygame backends
+        ├── control_filters.py    teleop-side filters (left-stick axis lock, optional smoothing)
+        └── gamepad_teleop_node   default = WSL-direct evdev, publishes /joint_command or /gripper_command
 ```
 
 ROS 2 packages added later in the sprint (W2-W3):
@@ -107,8 +116,16 @@ ros2 topic pub --once /joint_command sensor_msgs/msg/JointState \
 ros2 topic pub --once /gripper_command std_msgs/msg/Float32 '{data: 1.5}'  # open
 ros2 topic pub --once /gripper_command std_msgs/msg/Float32 '{data: 0.0}'  # close
 
-# Mode B: gamepad teleop (one-shot launches arm_driver + gamepad_teleop together)
-ros2 launch arm_teleop teleop.launch.py
+# Mode B: gamepad teleop (preferred current workflow: WSL-direct + evdev)
+scripts/start_teleop_wsl_gamepad.sh
+# Equivalent lower-level form:
+ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false
+
+# Optional comparison mode: same teleop, but enable gentle motion smoothing
+ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false enable_motion_smoothing:=true
+
+# Fallback mode: keep the controller on Windows and bridge over TCP
+ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=true
 
 # Mode C: MoveIt2 + RViz drag-the-orange-ball (uses upstream Waveshare config)
 # Terminal A:
@@ -118,16 +135,46 @@ ros2 launch roarm_moveit interact.launch.py
 srarm
 ros2 run arm_driver moveit_bridge_node
 
-# ⚠ Modes A / B / C are mutually exclusive — only one process at a time can hold /dev/ttyUSB0.
+# ⚠ Modes A / B / C are mutually exclusive — only one process at a time can hold /dev/ttyUSB*.
 
 # ---------- visualization ----------
 ros2 launch arm_description display.launch.py        # URDF in RViz only
 
 # ---------- USB device forwarding (Windows PowerShell, after each Windows reboot) ----------
 usbipd attach --wsl --busid 1-4    # RoArm-M2-S (CP2102N)
-usbipd attach --wsl --busid 1-3    # PDP Xbox gamepad
+usbipd attach --wsl --busid 1-3    # PDP Xbox gamepad (preferred long-term path)
 # Or just double-click scripts/attach_devices.bat from the Windows desktop.
 ```
+
+## Current teleop default (locked 2026-04-10)
+
+- **Default operator-facing path**: `scripts/start_teleop_wsl_gamepad.sh`
+- **Default backend**: `evdev` on `/dev/input/event*`
+- **Current control semantics**:
+  - left stick X/Y = base / shoulder
+  - right stick Y = elbow
+  - LB/RB = gripper close
+  - LT/RT = gripper open
+  - Start = home + re-enable
+  - Back = e-stop
+  - DPAD left/right = LED
+- **Important filters / behavior**:
+  - left stick uses a hard single-axis lock to suppress physical cross-axis bleed
+  - motion smoothing is **off by default**; stick magnitude maps directly to joint speed
+  - pure gripper teleop uses `/gripper_command`, and the driver sends dedicated protocol `T:106` instead of resending full-body `T:102`
+- **Known current state**:
+  - system is now usable and should be treated as the default version
+  - remaining issue is minor body micro-jitter during arm motion; do not revert the current direct stick-to-velocity semantics without a good reason
+
+## Teleop fallback matrix
+
+- **Primary**: `scripts/start_teleop_wsl_gamepad.sh`
+- **Direct WSL + smoothing on**:
+  - `ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false enable_motion_smoothing:=true`
+- **Windows bridge fallback**:
+  - Windows: `scripts\\bridge方案\\attach_devices_bridge_mode.bat`
+  - Windows: `scripts\\bridge方案\\bridge_gui.py`
+  - WSL: `ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=true`
 
 ## What NOT to do (deliberately scoped out of v1)
 

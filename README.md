@@ -108,7 +108,7 @@ The four-layer ANIMA architecture (NLU → Planning → Execution → Policy) is
 |---|---|
 | **Workstation laptop** | Windows 11 + RTX 4090 Laptop GPU (16 GB VRAM) |
 | **Dev environment** | WSL2 + Ubuntu 22.04 + CUDA passthrough |
-| **USB integration** | `usbipd-win` forwards camera, arm, and gamepad directly into WSL2 |
+| **USB integration** | Long-term recommended path: `usbipd-win` forwards camera, arm, and gamepad directly into WSL2; direct gamepad mode uses a custom WSL kernel with `JOYDEV + XPAD` |
 
 ### Robot
 
@@ -151,7 +151,7 @@ The four-layer ANIMA architecture (NLU → Planning → Execution → Policy) is
 | **Motion planning** | MoveIt2 (4-DOF, IKFast / BioIK) |
 | **Policy learning** | LeRobot ACT (Action Chunking Transformer), one model per primitive |
 | **Hardware driver** | Custom Python driver for the Waveshare serial protocol, exposed as a ROS 2 node |
-| **Data collection** | LeRobot teleop pipeline, gamepad input via `pygame` / `python-evdev` |
+| **Data collection** | LeRobot teleop pipeline, with WSL-direct `evdev` as the default gamepad path and Windows TCP bridge kept as fallback |
 | **Dataset format** | LeRobotDataset, published to HuggingFace Hub |
 | **Middleware** | ROS 2 Humble Hawksbill (single-machine) |
 | **Verification sim** | Gazebo (URDF visualization + cognitive layer dry-runs) |
@@ -281,6 +281,25 @@ usbipd attach --wsl --busid <C922_BUSID>
 usbipd attach --wsl --busid <ROARM_BUSID>
 usbipd attach --wsl --busid <PDP_GAMEPAD_BUSID>
 ```
+
+### Recommended long-term gamepad path (WSL direct attach)
+
+This repo now includes the supporting pieces for the WSL-direct workflow:
+
+- `scripts/build_wsl_gamepad_kernel.sh` builds a custom WSL kernel with `JOYDEV + XPAD`
+- `scripts/attach_devices.bat` attaches the arm and the controller directly into WSL
+- `scripts/check_wsl_gamepad_support.sh` verifies the running kernel and input devices
+- `scripts/start_teleop_wsl_gamepad.sh` launches teleop in Linux-local mode (`use_tcp_bridge:=false`)
+- `docs/WSL_Xbox手柄直通.md` documents the end-to-end setup
+
+When the controller is attached to WSL, Windows can no longer use it. This is intentional and prevents controller input from driving Windows UI elements or terminal focus. The legacy Windows bridge fallback now lives under `scripts/bridge方案/`.
+
+Current default teleop version (locked 2026-04-10):
+
+- `evdev` is the default Linux input backend
+- left stick uses a hard single-axis lock to suppress physical cross-axis bleed
+- motion smoothing is **off by default** so stick magnitude maps directly to joint speed
+- pure gripper motion uses a dedicated `/gripper_command` path backed by protocol `T:106`, not full-body `T:102`
 
 ---
 
