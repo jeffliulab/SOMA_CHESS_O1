@@ -316,6 +316,34 @@ This repo now includes the supporting pieces for the WSL-direct workflow:
 
 When the controller is attached to WSL, Windows can no longer use it. This is intentional and prevents controller input from driving Windows UI elements or terminal focus. The legacy Windows bridge fallback now lives under `scripts/bridge方案/`.
 
+Current shortest working path:
+
+1. In Windows Administrator PowerShell, run `usbipd list`
+2. Confirm the RoArm and Xbox controller busids for the current boot
+3. If they already show up as `Attached`, do not re-attach them; that is already the success state
+4. Otherwise run:
+
+```powershell
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
+.\attach_devices.bat
+```
+
+5. In WSL run:
+
+```bash
+cd ~/SOMA/SOMA_CHESS_O1
+scripts/start_teleop_wsl_gamepad.sh
+```
+
+6. Wait for `Teleop target initialized from current /joint_states.`
+7. Press `Start` once
+8. After `Start pressed — re-enabled, going home`, begin stick motion
+
+Two easy mistakes to avoid:
+
+- `Attached` is not an error; it means the device is already in WSL
+- `\\wsl$\\...` paths are Windows-only; inside WSL always use `~/SOMA/...`
+
 Current default teleop version (locked 2026-04-10):
 
 - `evdev` is the default Linux input backend

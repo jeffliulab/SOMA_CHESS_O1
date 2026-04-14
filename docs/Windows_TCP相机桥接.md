@@ -19,6 +19,7 @@
 - C922 留在 Windows 原生侧
 - 机械臂和手柄继续按原来的 `usbipd` 路线进 WSL
 - 当前机器继续使用 WSL mirrored networking
+- 只要你准备碰 `usbipd attach` 或任何 Windows 侧 USB 转发脚本，默认第一步都先跑 `usbipd list`，不要直接相信旧文档里的 busid
 
 ## 先准备 Windows bridge 专用环境
 

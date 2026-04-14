@@ -1,25 +1,39 @@
 @echo off
-REM ================================================================
-REM SOMA Chess O1 - Windows bridge fallback attach via usbipd-win
-REM
-REM Use this only when you intentionally keep the PDP Xbox controller on
-REM Windows and run scripts\bridge方案\bridge_gui.py. In this mode, only the RoArm
-REM is attached to WSL. The C922 should stay on native Windows and publish
-REM into WSL over ROS 2 DDS.
-REM ================================================================
+setlocal
 
-set ROARM_BUSID=1-4
-echo Listing current usbipd state:
+set "ROARM_BUSID=1-8"
+
+echo Listing current usbipd state...
 usbipd list
 echo.
 
-echo Attaching RoArm-M2-S (busid=%ROARM_BUSID%) to WSL...
-usbipd attach --wsl --busid %ROARM_BUSID%
+call :ensure_attached "%ROARM_BUSID%" "RoArm serial bridge"
+if errorlevel 1 goto :fail
 
 echo.
-echo Done. In bridge fallback mode, keep the PDP controller on Windows and
-echo launch scripts\bridge方案\bridge_gui.py there.
-echo Keep Logitech C922 on Windows and run
-echo scripts\bridge方案\start_camera_ros_publisher.bat there as needed.
-echo.
+echo Done.
+echo In bridge fallback mode, keep the PDP controller on Windows.
+echo Keep Logitech C922 on native Windows.
 pause
+exit /b 0
+
+:ensure_attached
+set "BUSID=%~1"
+set "LABEL=%~2"
+
+usbipd list | findstr /R /C:"^%BUSID% .*Attached" >nul
+if not errorlevel 1 (
+    echo %LABEL% is already attached to WSL. busid=%BUSID%
+    exit /b 0
+)
+
+echo Attaching %LABEL% to WSL. busid=%BUSID%
+usbipd attach --wsl --busid %BUSID%
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:fail
+echo.
+echo usbipd attach failed. Check the busid value above with usbipd list.
+pause
+exit /b 1

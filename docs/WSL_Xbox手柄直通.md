@@ -6,6 +6,31 @@
 
 这条路线是本项目长期推荐方案。Windows bridge 方案仍然保留在 `scripts/bridge方案/` 下，但只作为 stock WSL 内核下的备选方案。
 
+## 当前最短可用操作
+
+如果你这台机器已经完成过自定义 WSL 内核配置，那么日常实际操作就按这四步走：
+
+1. Windows 管理员 PowerShell 先跑 `usbipd list`
+2. 只确认 RoArm 和 Xbox 手柄当前的 busid；如果它们已经显示为 `Attached`，这一步就算成功，不需要重复 attach
+3. Windows 侧运行：
+
+```powershell
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
+.\attach_devices.bat
+```
+
+4. WSL 侧运行：
+
+```bash
+cd ~/SOMA/SOMA_CHESS_O1
+scripts/start_teleop_wsl_gamepad.sh
+```
+
+然后注意两个真正会影响“能不能动”的条件：
+
+- 先等 `arm_driver` 开始发布 `/joint_states`
+- 再按一次 `Start`，teleop 会打印 `Start pressed — re-enabled, going home`，从这之后摇杆输入才会正式进入工作状态
+
 ## 方案概览
 
 1. 用 `usbipd-win` 把手柄独占 attach 到 WSL
@@ -89,7 +114,9 @@ cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
 
 注意：
 
+- 第一步永远先看 `usbipd list`，不要默认相信旧日志里的 busid
 - 首次使用前，需要先 `usbipd bind --busid <BUSID>`
+- 如果 `usbipd list` 里已经显示目标设备是 `Attached`，说明它已经进 WSL 了，这不是失败，可以直接继续后面的 WSL 步骤
 - 当手柄 attached 到 WSL 后，Windows 将不再接收这个手柄输入
 - 这正是本方案的核心价值之一
 
@@ -127,6 +154,11 @@ ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false
 - 左摇杆有单轴锁定，避免物理串轴直接变成底座+肩关节同时抖动
 - 运动平滑默认关闭：摇杆大小直接映射速度，摇杆回中时速度立刻回零
 - 纯夹爪动作走 `/gripper_command`，driver 底层使用官方 `T:106` 末端独立命令，不再重发整条手臂的 `T:102`
+
+实际操作时再记住两点：
+
+- 终端里看到 `Teleop target initialized from current /joint_states.`，说明 teleop 已经拿到了真机当前姿态
+- 按一次 `Start` 会解除急停并回到 Home；这通常也是最稳的“开始操作前同步一下状态”的动作
 
 ## 为什么这条路线更稳
 

@@ -316,6 +316,34 @@ WSL 侧继续订阅：
 
 这条路线的关键优点是：手柄 attached 到 WSL 之后，Windows 将不再使用它，因此不会再干扰 Windows Terminal 或其他 UI。旧的 Windows bridge 备选方案已整理到 `scripts/bridge方案/` 下。
 
+当前最短可用操作：
+
+1. Windows 管理员 PowerShell 先跑 `usbipd list`
+2. 确认当次开机下 RoArm 和 Xbox 手柄的 busid
+3. 如果它们已经显示为 `Attached`，就不要重复 attach；这本来就是成功态
+4. 否则运行：
+
+```powershell
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
+.\attach_devices.bat
+```
+
+5. WSL 里运行：
+
+```bash
+cd ~/SOMA/SOMA_CHESS_O1
+scripts/start_teleop_wsl_gamepad.sh
+```
+
+6. 等日志出现 `Teleop target initialized from current /joint_states.`
+7. 按一次 `Start`
+8. 再看到 `Start pressed — re-enabled, going home` 后开始推摇杆
+
+两个最容易踩的坑：
+
+- `Attached` 不是失败，而是已经成功进 WSL
+- `\\wsl$\\...` 路径只能在 Windows shell 里用；WSL 里要用 `~/SOMA/...`
+
 当前默认 teleop 版本（2026-04-10 锁定）：
 
 - `evdev` 是默认 Linux 输入后端

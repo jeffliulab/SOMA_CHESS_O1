@@ -27,7 +27,7 @@ This is a **portfolio / job-hunting project**, public Apache-2.0, written by Jef
 
 - **Arm**: Waveshare RoArm-M2-S — 4-DOF, USB serial via CP2102N, ESP32 + ST3215 servos, ~280mm reach, ~500g payload, ~826g
 - **Camera**: Logitech C922 Pro Stream Webcam — USB UVC, fixed overhead
-- **Teleop input**: PDP Wired Controller for Xbox — XInput, user already owns (as of 2026-04-10 it appears as busid `1-8` on this machine after the C922 was attached)
+- **Teleop input**: PDP Wired Controller for Xbox — XInput, user already owns. Do not trust any old recorded busid for it; always confirm the current busid with `usbipd list` before advising attach commands.
 - **Compute**: Workstation laptop, **RTX 4090 Laptop GPU (16 GB VRAM)** — note: NOT the desktop 24 GB variant; this was misdocumented earlier
 - **No Pi 5, no mobile base, no LiDAR in v1** — everything plugs directly into the host PC
 - **Object set v1**: yellow/green dual-sided sponge cubes (~4-5cm) + chess pieces (pawns and rooks primary; mixed types for demo) + green-rim white-interior plastic bin
@@ -37,7 +37,7 @@ This is a **portfolio / job-hunting project**, public Apache-2.0, written by Jef
 - **Host**: Windows 11 (user's primary OS, GPU known to perform at full capacity here)
 - **Dev**: WSL2 + Ubuntu 22.04 — chosen over dual-boot Linux because the user's hardware suffers GPU performance loss on dual-boot. WSL2 + CUDA passthrough preserves full RTX 4090 Laptop performance.
 - **Python venv**: `~/SOMA/SOMA_CHESS_O1/.venv/`, created with `python3 -m venv --system-site-packages .venv`. The `--system-site-packages` flag is **mandatory** so the venv can import the system `rclpy` from `/opt/ros/humble/...`. LeRobot, pygame, pyserial, torch (with CUDA) are installed inside this venv.
-- **USB**: Long-term recommended path is now split: `usbipd-win` forwards the RoArm and Xbox gamepad into WSL2 as `/dev/ttyUSB*` and `/dev/input/event*`, while the Logitech C922 stays on native Windows and streams into WSL over a lightweight TCP camera bridge. Current recorded mapping on this machine (2026-04-10) is: RoArm = busid `1-4` (`CP2102N`), C922 = busid `1-3`, PDP gamepad = busid `1-8`. These busids may change after replugging, so always verify with `usbipd list` before assuming they are stable. The WSL-direct gamepad path requires a custom WSL kernel with `JOYDEV + XPAD`; see [docs/WSL_Xbox手柄直通.md](docs/WSL_Xbox手柄直通.md), [docs/Windows_TCP相机桥接.md](docs/Windows_TCP相机桥接.md), and [scripts/attach_devices.bat](scripts/attach_devices.bat). The Windows TCP bridge remains a fallback only.
+- **USB**: Long-term recommended path is now split: `usbipd-win` forwards the RoArm and Xbox gamepad into WSL2 as `/dev/ttyUSB*` and `/dev/input/event*`, while the Logitech C922 stays on native Windows and streams into WSL over a lightweight TCP camera bridge. Busids on this machine are not stable across replug / reboot / topology changes, so the first step before any attach guidance is always `usbipd list`. Do not trust stale busids from old logs or screenshots. The WSL-direct gamepad path requires a custom WSL kernel with `JOYDEV + XPAD`; see [docs/WSL_Xbox手柄直通.md](docs/WSL_Xbox手柄直通.md), [docs/Windows_TCP相机桥接.md](docs/Windows_TCP相机桥接.md), and [scripts/attach_devices.bat](scripts/attach_devices.bat). The Windows TCP bridge remains a fallback only.
 - **ROS 2**: Humble Hawksbill (LTS, best LeRobot compat). MoveIt2 installed via `apt install ros-humble-moveit`. Note: must `apt install --only-upgrade ros-humble-ompl` to get OMPL 1.7.0+ (provides `libompl.so.18`), otherwise `move_group` segfaults — known ROS Humble apt packaging mismatch.
 - **Graphics**: WSLg (Gazebo / RViz2 work but slower — fine since they're not the bottleneck)
 - **Shell helper**: `srarm` function in `~/.bashrc` — one command to enter dev mode (cd into workspace + source ROS 2 + activate venv + source overlay)
@@ -95,7 +95,7 @@ ROS 2 packages added later in the sprint (W2-W3):
 - **Naming**: ROS packages have NO `soma_` prefix anymore. They use `anima_node`, `arm_description`, `arm_bringup`, etc.
 - **Author / copyright**: always **"Jeff Liu Lab"** (jeffliulab.com, GitHub @jeffliulab). Don't drop the "Lab" suffix.
 - **Don't over-engineer**: this is pre-alpha. No CI, no packaging, no contribution guides, no code-of-conduct. Add them when there's a real reason.
-- **Dev log sync**: after each meaningful SOMA Chess O1 work session, update the parent-repo log at `~/SOMA/开发日志/SOMA_CHESS_O1/V1.0-开发日志.md`. Use a readable daily-work-journal style in Chinese with these sections: `一句话总结`, `今天做了什么`, `解决了什么问题`, `发现了什么问题`, `下一步`. If the default workflow or common commands changed, also update `~/SOMA/常用命令.md`.
+- **Dev log sync**: after each meaningful SOMA Chess O1 work session, update the parent-repo log at `~/SOMA/开发日志/SOMA_CHESS_O1/V1.01-开发日志.md`. `V1.00` is now archived; new work should go into the current small-version log. Use a readable daily-work-journal style in Chinese: under each date, start with one natural summary sentence, then write `今天做了什么`, `解决了什么问题`, `发现了什么问题`, and only add `下一步` when the next action is already clear from the real project state. Write like I am recording my own work, but keep the tone natural instead of repeatedly emphasizing “我”. Do not write as an observer saying what "the user" did. If the default workflow or common commands changed, also update `~/SOMA/常用命令.md`.
 
 ## Common commands
 
@@ -148,12 +148,42 @@ ros2 run arm_driver moveit_bridge_node
 ros2 launch arm_description display.launch.py        # URDF in RViz only
 
 # ---------- USB device forwarding (Windows PowerShell, after each Windows reboot) ----------
-usbipd attach --wsl --busid 1-4    # RoArm-M2-S (CP2102N)
-usbipd attach --wsl --busid 1-8    # PDP Xbox gamepad (current recorded busid)
+usbipd list                         # always check current busid first
+usbipd attach --wsl --busid <ROARM_BUSID>
+usbipd attach --wsl --busid <PDP_BUSID>
 # Do not attach the C922 here in the normal workflow.
 # Keep the camera on Windows and run scripts\bridge方案\start_camera_bridge.bat there.
 # Or just double-click scripts/attach_devices.bat from the Windows desktop for arm + gamepad only.
+# Never trust old recorded busids without checking usbipd list again first.
 ```
+
+## Teleop startup flow (agent-facing default)
+
+This is the standard operator path and should be the first thing an agent recommends for arm teleop:
+
+1. Windows Administrator PowerShell: run `usbipd list`
+2. Confirm the RoArm serial bridge and Xbox controller busids for the current boot
+3. If both devices are already `Attached`, that step is already successful; do not re-attach just because the script previously printed an error
+4. Otherwise run `scripts\\attach_devices.bat`
+5. In WSL:
+
+```bash
+cd ~/SOMA/SOMA_CHESS_O1
+scripts/start_teleop_wsl_gamepad.sh
+```
+
+6. Wait for:
+   - `Connected to RoArm-M2-S`
+   - `Opened evdev gamepad`
+   - `Teleop target initialized from current /joint_states.`
+7. Press `Start` once
+8. Confirm `Start pressed — re-enabled, going home`
+9. Then begin stick motion
+
+Two common operator mistakes to avoid:
+
+- `Attached` is not an error; it means the device is already in WSL
+- `\\wsl$\\...` paths are Windows-only; in WSL always use `~/SOMA/...`
 
 ## Current teleop default (locked 2026-04-10)
 
