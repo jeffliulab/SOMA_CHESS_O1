@@ -1,7 +1,7 @@
 # SOMA Chess O1 — 锁定决策参考
 
 > 本文档记录 v1 开发中所有已锁定的硬件、软件、战略决策，以及明确废弃的备选方案。
-> 决策锁定日期：2026-04-07（部分更新至 2026-04-10）。
+> 决策锁定日期：2026-04-07（部分更新至 2026-04-16）。
 > **如需修改任何决策，请先和项目负责人确认方向变化。**
 
 ---
@@ -15,8 +15,8 @@
 | 3 | **相机** | Logitech C922 Pro Stream Webcam | ✅ 已有 | USB UVC, 1080p@30, ALOHA 同款，社区经验丰富，可复现性好 |
 | 4 | **相机支架** | JOBY GorillaPod 柔性三脚架 | ✅ | 缠绕桌沿，~50–60cm 俯视，~60° 角，稳定固定 |
 | 5 | **工作区光照** | 独立 LED 桌面台灯 | ✅ | 独立于环境光，跨 session 一致 |
-| 6 | **桌面物体集** | 黄/绿双面海绵块（~4-5cm）+ 棋子 | ✅ 已有 | 柔顺材质对舵机精度宽容；双色支持语言 grounding 任务 |
-| 7 | **目标容器** | 绿色外圈 + 白色内壁塑料盒（~15×12cm） | ✅ 已有 | 高对比内壁方便视觉验证"物体进入盒子" |
+| 6 | **桌面物体集** | 国际象棋棋子（标准尺寸） | ✅ 已有 | V1 目标已升级为棋子吃子；海绵块不再使用 |
+| 7 | **棋盘** | 标准国际象棋棋盘 | ✅ 已有 | 棋盘格提供天然坐标系和视觉参考 |
 | 8 | **背景垫** | 黑色 KT 板（A3, ~$3） | 📋 待购 | 当前木纹色桌面背景对感知模型不友好 |
 | 9 | **Teleop 输入** | PDP Wired Controller for Xbox | ✅ 已有 | XInput, Linux xpad 原生支持, 4 摇杆轴 1:1 映射 4-DOF |
 | 10 | **训练/推理 PC** | 工作站笔记本 + **RTX 4090 Laptop (16 GB VRAM)**, Windows 11 | ✅ 已有 | 注意：是 Laptop 16GB 版，非桌面 24GB 版（2026-04-08 修正） |
@@ -65,13 +65,10 @@ ACT 学习的原子技能，作为 ANIMA 行为树的叶节点。
 
 | Primitive | 输入 | 动作 | 4-DOF 可行性 | 优先级 |
 |---|---|---|---|---|
-| `pick(x, y, object_class)` | 物体像素 → 世界坐标 | top-down 抓取（gripper 宽度按 object_class 选择） | ✅ | **核心** |
-| `place(x, y)` | 目标世界坐标 | 在指定位置释放 | ✅ | **核心** |
-| `push(from, to)` | 起点 + 终点坐标 | 非抓取式推动 | ✅ | **核心** |
-| `sweep(area)` | 区域 | 多物体聚拢 | ✅ | stretch |
-| `stack_on(target)` | 目标物体顶部 | 堆叠 | ⚠️ 2~3 层封顶 | stretch |
+| `chess_pick(square)` | 棋盘格坐标 → 世界坐标 | top-down 抓取棋子 | ✅ | **核心** |
+| `chess_place(square)` | 目标棋盘格坐标 | 将棋子放到指定格子 | ✅ | **核心** |
 
-Week 4 数据采集只采前 3 个核心原语。ACT 训练目标：`act_sponge_pick`、`act_chess_pick`、`act_place_into_bin` 三个检查点（或一个 multi-task 模型）。
+ACT 训练目标（V1.02）：`act_chess_pick` / `act_chess_place` 两个检查点。
 
 ---
 
@@ -81,12 +78,23 @@ ANIMA 在 ACT 原语之上编排不同复杂度的任务。
 
 | Tier | 说明 | 示例 |
 |---|---|---|
-| **Tier 1** | 单步语言 grounding（入门 demo） | "Put the red block in the green box." |
-| **Tier 2** | 多步长时程（RT-1 / RT-2 级别） | "Sort the blocks by color." |
-| **Tier 3** | 条件 + 空间推理（ANIMA 差异化） | "If there's a red block, put it in the green box, otherwise the blue one." |
-| **Tier 4** | Test-and-check + 失败恢复（DIARC 签名特性）| 抓取失败 → 视觉验证 → 重试 → 自然语言报告 |
+| **Tier 1** | 单步棋子操作 | "Pick up the pawn on e4." |
+| **Tier 2** | 吃子操作（两步）| "Capture: move captured piece off board, then move capturing piece to target square." |
+| **Tier 3** | 引擎驱动吃子（感知+推理+执行）| 识别棋盘 → 查询引擎可吃的子 → 执行吃子 |
+| **Tier 4** | Test-and-check + 失败恢复（视觉验证闭环）| 吃子后视觉验证棋盘状态 → 成功 / 重试 / 报告 |
 
 Tier 4 是项目核心差异化卖点——业内几乎没有 LLM-robot demo 在做 test-and-check 验证闭环。
+
+---
+
+## 游戏引擎框架（2026-04-16 新增）
+
+| 项目 | 决定 | 理由 |
+|---|---|---|
+| 框架位置 | `~/SOMA/ANIMA_O1/` 内作为子模块 | ANIMA 保持机器人无关性；引擎是认知层的一部分 |
+| 接口抽象 | `GameEngine.legal_moves(board_state) → List[Move]` | ANIMA 不关心具体棋类规则，只调用引擎接口 |
+| 第一个插件 | 国际象棋（可用 python-chess 库） | 项目名就叫 Chess O1 |
+| 可扩展性 | 每种棋类一个 engine 插件（围棋/中国象棋/将棋/麻将等） | 用户长期愿景：通用桌游机器人 |
 
 ---
 
@@ -95,10 +103,10 @@ Tier 4 是项目核心差异化卖点——业内几乎没有 LLM-robot demo 在
 | 决策项 | 决定 | 理由 |
 |---|---|---|
 | 机器人形态 | **固定桌面操作器** | 不做 mobile；ALOHA / RT-1 / OpenVLA / LeRobot 全部从固定站起步 |
-| 任务域 | **语言驱动 pick/place/push**，海绵 + 棋子 → 盒子 | 不做衣物/柔性物体 — 需要 ALOHA 级双臂 + Isaac cloth physics |
+| 任务域 | **棋盘上识别可吃的子 + 理解棋规 + 执行吃子** | 不需要完整对弈；不做衣物/柔性物体 |
 | 仿真使用 | **Gazebo 仅 URDF 验证 + ANIMA dry-run** | 不用于 ML 训练；ACT 只训真机 teleop 数据 |
 | 训练方式 | **真机 teleop only** | 无 sim2real，无 RL，无 VLA fine-tuning（v1） |
-| v1/v2 边界 | v1（本仓库）= 语言驱动分拣；v2（单独私有仓库）= 真正的下棋功能 | chess 域提供清晰的客观基准；v2 包含 Stockfish + Claude 下棋 |
+| v1/v2 边界 | v1（本仓库）= 棋子吃子（识别+规则+执行）；v2 = 完整对弈 + 多棋类 | v1 不需要完整对弈；v2 加 Stockfish/Claude 选最优走法 |
 | ANIMA 位置 | 独立子模块 `~/SOMA/ANIMA_O1/` | 保持机器人无关性，两个公开 repo = 更强 portfolio 叙事 |
 
 ---
@@ -126,7 +134,7 @@ Tier 4 是项目核心差异化卖点——业内几乎没有 LLM-robot demo 在
 
 | 风险 | 缓解措施 |
 |---|---|
-| RoArm-M2-S 精度低（hobby 舵机 ~1-2mm 重复定位） | 用更大物体（5cm 立方块），保守抓取，仅 top-down |
+| RoArm-M2-S 精度低（hobby 舵机 ~1-2mm 重复定位） | 棋子尺寸适中，保守抓取，仅 top-down |
 | RoArm-M2-S 没有官方 ROS 2 驱动 | 自写薄层 Python driver（< 200 行），已完成 |
 | ACT 从 teleop 数据迁移到自主执行效果差 | 采更多 demo，提升 teleop 质量；demo 时可 fallback 到硬编码 MoveIt2 原语 |
 | LLM parser 产生非法 TaskSpec | ANIMA validator 捕获 + 重试；Claude constrained generation |

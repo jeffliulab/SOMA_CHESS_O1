@@ -38,12 +38,12 @@
                                    ▼
                     ┌──────────────────────────┐
                     │  ANIMA Validator         │  test-and-check via vision
-                    │  (DIARC-inspired)        │  → success / retry / report
+                    │  (vision-based)          │  → success / retry / report
                     └──────────────────────────┘
 ```
 
 **架构关键点**：
-- **ANIMA = 主角**：LLM-as-Parser 解析意图，py_trees 行为树编排，validator 做 test-and-check（DIARC 签名特性）
+- **ANIMA = 主角**：LLM-as-Parser 解析意图，py_trees 行为树编排，validator 做 test-and-check（视觉验证闭环）
 - **ACT = 低层 API**：每个原语是独立 ACT policy，对外暴露成"函数调用"
 - **Grounding DINO + SAM2 = 感知桥梁**：将自然语言短语转为像素 → 世界坐标
 - **MoveIt2 兜底**：即便 ACT 训练失败，硬编码 IK 原语仍可跑 demo

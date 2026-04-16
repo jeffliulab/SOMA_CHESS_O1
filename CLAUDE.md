@@ -6,9 +6,9 @@
 
 ## 项目简介
 
-**SOMA Chess O1** — 语言驱动的固定桌面操作器，v1 目标：用自然语言命令将海绵块和棋子分拣入容器。认知层 ANIMA（Claude API + py_trees）解析指令，Grounding DINO + SAM2 做视觉定位，ACT（LeRobot）执行物理动作，validator 做 test-and-check 闭环。Apache-2.0，Jeff Liu Lab。
+**SOMA Chess O1** — 语言驱动的固定桌面操作器，v1 目标：在棋盘上识别可吃的子、理解棋规、执行吃子动作。认知层 ANIMA（Claude API + py_trees + 游戏引擎）解析指令，Grounding DINO + SAM2 做视觉定位，ACT（LeRobot）执行物理动作，validator 做 test-and-check 闭环。Apache-2.0，Jeff Liu Lab。
 
-**当前版本**: V1.01（相机稳定化 / eye-to-hand 标定 / world grounding）  
+**当前版本**: V1.01（感知基础）  
 **任务清单**: [`开发进度与待办事项.md`](开发进度与待办事项.md)
 
 ---
@@ -76,14 +76,14 @@ colcon build --symlink-install
 
 遇到以下建议请礼貌推回——它们是 v2+ 范围，会偏离当前 sprint：
 
+- ❌ 完整对弈（v1 只做吃子，不做最优走法选择）— v2 范围
 - ❌ 移动底盘 / Nav2 / SLAM（真机）
 - ❌ 衣物 / 柔性物体 / 力反馈 / 双臂
 - ❌ MuJoCo / Isaac Sim / Isaac Lab（不用于 ML 训练）
 - ❌ sim2real（只用真机 teleop 数据训练 ACT）
-- ❌ 强化学习 / VLA fine-tuning（week 8 stretch 才考虑）
+- ❌ 强化学习 / VLA fine-tuning
 - ❌ 自定义感知模型训练（Grounding DINO + SAM2 零样本）
 - ❌ Pi 5 嵌入式部署（v1 全部直插 PC）
-- ❌ 下棋功能（board state → legal move → execute）— v2 私有仓库
 
 ---
 

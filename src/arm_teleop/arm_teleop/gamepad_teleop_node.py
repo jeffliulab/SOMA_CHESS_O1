@@ -60,7 +60,6 @@ SHOULDER_DECEL_RATE = 6.0
 ELBOW_ACCEL_RATE = 2.5
 ELBOW_DECEL_RATE = 6.0
 GRIPPER_BASE_SPEED = 1.0
-GRIPPER_TRIGGER_SCALE = 1.5
 CONTROL_HZ = 50.0
 ENABLE_MOTION_SMOOTHING = False
 
@@ -184,7 +183,7 @@ class GamepadTeleopNode(Node):
 
     def _tick(self) -> None:
         now = time.time()
-        dt = max(0.001, now - self._last_tick)
+        dt = max(0.001, min(now - self._last_tick, 2.0 / self._control_hz))
         self._last_tick = now
 
         raw_state = self._backend.read()
@@ -265,6 +264,7 @@ class GamepadTeleopNode(Node):
             self._target = clamp_urdf(self._target)
             if self._target[3] != self._last_pub_target[3]:
                 self._publish_gripper_target()
+            self._was_moving = False
 
         self._remember_buttons(state)
 
@@ -290,9 +290,7 @@ class GamepadTeleopNode(Node):
         if state.lb or state.rb:
             self._target[3] -= GRIPPER_BASE_SPEED * dt
         elif gripper_open > 0.0:
-            self._target[3] += (
-                GRIPPER_BASE_SPEED * (1.0 + GRIPPER_TRIGGER_SCALE * gripper_open) * dt
-            )
+            self._target[3] += GRIPPER_BASE_SPEED * gripper_open * dt
 
     def _reset_motion_limiters(self) -> None:
         self._base_limiter.reset()
