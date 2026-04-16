@@ -9,7 +9,7 @@ Requirements (Windows Python):
     (tkinter is built into Python — no extra install needed)
 
 Usage:
-    python \\\\wsl$\\Ubuntu-22.04\\home\\jeffliu\\SOMA\\SOMA_CHESS_O1\\scripts\\bridge方案\\bridge_gui.py
+    python \\\\wsl$\\Ubuntu-22.04\\home\\jeffliu\\SOMA\\soma-arm\\scripts\\bridge方案\\bridge_gui.py
 """
 
 from __future__ import annotations

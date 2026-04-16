@@ -1,4 +1,4 @@
-# SOMA Chess O1 — 项目指南针
+# SOMA Arm — 项目指南针
 
 > 本文件是 Claude Code 的导航索引。内容保持简洁；细节请查阅下方对应文档。
 
@@ -6,7 +6,7 @@
 
 ## 项目简介
 
-**SOMA Chess O1** — 语言驱动的固定桌面操作器，v1 目标：在棋盘上识别可吃的子、理解棋规、执行吃子动作。认知层 ANIMA（Claude API + py_trees + 游戏引擎）解析指令，Grounding DINO + SAM2 做视觉定位，ACT（LeRobot）执行物理动作，validator 做 test-and-check 闭环。Apache-2.0，Jeff Liu Lab。
+**SOMA Arm** — 语言驱动的固定桌面操作器，v1 目标：在棋盘上识别可吃的子、理解棋规、执行吃子动作。认知层 ANIMA（Claude API + py_trees + 游戏引擎）解析指令，Grounding DINO + SAM2 做视觉定位，ACT（LeRobot）执行物理动作，validator 做 test-and-check 闭环。Apache-2.0，Jeff Liu Lab。
 
 **当前版本**: V1.01（感知基础）  
 **任务清单**: [`开发进度与待办事项.md`](开发进度与待办事项.md)
@@ -92,7 +92,7 @@ colcon build --symlink-install
 - **语言**: 代码 / ROS 包名 / commit 消息：英文；文档 / 注释 / 对话：中文（技术术语保留英文）
 - **署名**: 始终用 **Jeff Liu Lab**（不省略 "Lab"）；jeffliulab.com，GitHub @jeffliulab
 - **pre-alpha**: 不加 CI、packaging、contribution guide — 增加复杂度时须有真实理由
-- **开发日志**: 每次有意义的工作后更新 `~/SOMA/docs/logs/SOMA_CHESS_O1/V1.01-开发日志.md`
+- **开发日志**: 每次有意义的工作后更新 `~/SOMA/docs/logs/soma-arm/V1.01-开发日志.md`
 - **常用命令**: 工作流或启动方式有变化时同步更新 `~/SOMA/常用命令.md`
 - **外部上游代码**: 不要 vendor 进本 repo（license 隔离）；放在 `~/SOMA/DRIVERS/`
 

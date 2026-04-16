@@ -15,14 +15,14 @@
 3. Windows 侧运行：
 
 ```powershell
-cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts
 .\attach_devices.bat
 ```
 
 4. WSL 侧运行：
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/start_teleop_wsl_gamepad.sh
 ```
 
@@ -62,7 +62,7 @@ scripts/start_teleop_wsl_gamepad.sh
 在 WSL 内执行：
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/build_wsl_gamepad_kernel.sh
 ```
 
@@ -108,7 +108,7 @@ wsl --shutdown
 以管理员身份打开 PowerShell，运行：
 
 ```powershell
-cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts
 .\attach_devices.bat
 ```
 
@@ -123,7 +123,7 @@ cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
 ### 4. WSL 内验证
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/check_wsl_gamepad_support.sh
 ```
 
@@ -137,7 +137,7 @@ scripts/check_wsl_gamepad_support.sh
 ### 5. 启动 Linux 本地 teleop
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/start_teleop_wsl_gamepad.sh
 ```
 

@@ -1,5 +1,5 @@
 """
-ANIMA Core Node — The cognitive brain of SmartRobotArm.
+ANIMA Core Node — The cognitive brain of SOMA Arm.
 
 Pipeline:
   1. Receive natural language instruction (String topic)
@@ -9,8 +9,8 @@ Pipeline:
   5. Execute behavior tree (dispatches to skill nodes)
   6. Report results back to user
 
-This is Layer 1 + Layer 2 of the ANIMA architecture (see github.com/jeffliulab/ANIMA_O1).
-SmartRobotArm is a fixed tabletop manipulator (Waveshare RoArm-M2-S, 4-DOF).
+This is Layer 1 + Layer 2 of the ANIMA architecture (see github.com/jeffliulab/anima).
+SOMA Arm is a fixed tabletop manipulator (Waveshare RoArm-M2-S, 4-DOF).
 """
 
 import json
@@ -38,7 +38,7 @@ TASK_SPEC_SCHEMA = {
 }
 
 # System prompt for LLM parser
-SYSTEM_PROMPT = """You are the ANIMA task parser for SmartRobotArm, a fixed tabletop manipulator.
+SYSTEM_PROMPT = """You are the ANIMA task parser for SOMA Arm, a fixed tabletop manipulator.
 
 The robot has these capabilities:
 - Detect objects on the workspace using a fixed overhead camera (detect_object)

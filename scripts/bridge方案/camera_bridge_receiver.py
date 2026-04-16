@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import site
 import socket
 import struct
@@ -31,8 +32,15 @@ from rclpy.qos import QoSHistoryPolicy  # noqa: E402
 from sensor_msgs.msg import CameraInfo  # noqa: E402
 from sensor_msgs.msg import Image  # noqa: E402
 
+try:
+    import yaml  # noqa: E402
+except ImportError:  # pragma: no cover - environment-dependent
+    yaml = None
+
 
 HEADER_STRUCT = struct.Struct("!II")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CAMERA_INFO_YAML = REPO_ROOT / "config" / "calibration" / "camera_intrinsics.yaml"
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -71,12 +79,14 @@ class CameraBridgeReceiver(Node):
         self._latest_packet_seq = 0
         self._latest_packet: tuple[bytes, dict] | None = None
         self._reader_error: Exception | None = None
+        self._camera_info_template = _load_camera_info_template(self, args.camera_info_yaml)
 
     def log_startup(self) -> None:
         self.get_logger().info(
             "Starting WSL camera bridge receiver | "
             f"host={self._args.host} port={self._args.port} "
-            f"image_topic={self._args.image_topic} camera_info_topic={self._args.camera_info_topic}"
+            f"image_topic={self._args.image_topic} camera_info_topic={self._args.camera_info_topic} "
+            f"camera_info_yaml={self._args.camera_info_yaml or 'none'}"
         )
 
     def run(self) -> int:
@@ -187,11 +197,11 @@ class CameraBridgeReceiver(Node):
         camera_info_msg.header.frame_id = image_msg.header.frame_id
         camera_info_msg.width = width
         camera_info_msg.height = height
-        camera_info_msg.distortion_model = "plumb_bob"
-        camera_info_msg.d = []
-        camera_info_msg.k = [0.0] * 9
-        camera_info_msg.r = [0.0] * 9
-        camera_info_msg.p = [0.0] * 12
+        camera_info_msg.distortion_model = self._camera_info_template["distortion_model"]
+        camera_info_msg.d = self._camera_info_template["d"]
+        camera_info_msg.k = self._camera_info_template["k"]
+        camera_info_msg.r = self._camera_info_template["r"]
+        camera_info_msg.p = self._camera_info_template["p"]
 
         self._image_pub.publish(image_msg)
         self._camera_info_pub.publish(camera_info_msg)
@@ -235,10 +245,92 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=65433)
     parser.add_argument("--image-topic", default="/camera/image_raw")
     parser.add_argument("--camera-info-topic", default="/camera/camera_info")
+    parser.add_argument(
+        "--camera-info-yaml",
+        default=str(DEFAULT_CAMERA_INFO_YAML) if DEFAULT_CAMERA_INFO_YAML.exists() else "",
+        help=(
+            "Optional calibration YAML used to populate /camera/camera_info. "
+            "Defaults to config/calibration/camera_intrinsics.yaml when present."
+        ),
+    )
     parser.add_argument("--frame-id", default="camera_optical_frame")
     parser.add_argument("--reconnect-delay-sec", type=float, default=1.0)
     parser.add_argument("--runtime-log-interval-sec", type=float, default=5.0)
     return parser.parse_args()
+
+
+def _load_camera_info_template(node: Node, yaml_path: str) -> dict:
+    template = {
+        "distortion_model": "plumb_bob",
+        "d": [],
+        "k": [0.0] * 9,
+        "r": [0.0] * 9,
+        "p": [0.0] * 12,
+    }
+    if not yaml_path:
+        node.get_logger().info("No camera_info YAML configured; publishing placeholder intrinsics.")
+        return template
+
+    if yaml is None:
+        node.get_logger().warning(
+            "PyYAML is unavailable in this environment; falling back to placeholder camera_info."
+        )
+        return template
+
+    path = Path(yaml_path).expanduser()
+    if not path.exists():
+        node.get_logger().warning(
+            f"camera_info YAML not found: {path}. Falling back to placeholder intrinsics."
+        )
+        return template
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        node.get_logger().warning(
+            f"Failed to parse camera_info YAML {path}: {exc}. Falling back to placeholder intrinsics."
+        )
+        return template
+
+    if str(data.get("status", "")).lower() == "pending_calibration":
+        node.get_logger().info(
+            f"camera_info YAML {path} is still marked pending_calibration; publishing placeholder intrinsics."
+        )
+        return template
+
+    try:
+        template["distortion_model"] = str(data.get("distortion_model", "plumb_bob"))
+        template["d"] = _extract_yaml_vector(data, "distortion_coefficients", 0)
+        template["k"] = _extract_yaml_vector(data, "camera_matrix", 9)
+        template["r"] = _extract_yaml_vector(data, "rectification_matrix", 9)
+        template["p"] = _extract_yaml_vector(data, "projection_matrix", 12)
+    except Exception as exc:
+        node.get_logger().warning(
+            f"camera_info YAML {path} is malformed: {exc}. Falling back to placeholder intrinsics."
+        )
+        return {
+            "distortion_model": "plumb_bob",
+            "d": [],
+            "k": [0.0] * 9,
+            "r": [0.0] * 9,
+            "p": [0.0] * 12,
+        }
+    node.get_logger().info(f"Loaded camera_info calibration from {path}")
+    return template
+
+
+def _extract_yaml_vector(data: dict, key: str, expected_length: int) -> list[float]:
+    value = data.get(key, {})
+    if isinstance(value, dict):
+        vector = value.get("data", [])
+    else:
+        vector = value
+
+    numbers = [float(item) for item in vector]
+    if expected_length > 0 and len(numbers) != expected_length:
+        raise ValueError(f"{key} must contain {expected_length} values, got {len(numbers)}")
+    return numbers
 
 
 def main() -> int:

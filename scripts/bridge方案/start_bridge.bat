@@ -2,7 +2,7 @@
 :: Gamepad bridge launcher — captures stderr, auto-restarts on crash.
 :: Run this instead of running bridge方案\gamepad_bridge.py directly.
 
-set SCRIPT=\\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts\bridge方案\gamepad_bridge.py
+set SCRIPT=\\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts\bridge方案\gamepad_bridge.py
 set ERRLOG=%TEMP%\gamepad_bridge_stderr.log
 
 echo ============================================================

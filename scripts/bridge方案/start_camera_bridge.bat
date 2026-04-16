@@ -2,7 +2,7 @@
 setlocal
 
 REM ================================================================
-REM SOMA Chess O1 - Windows camera bridge sender
+REM SOMA Arm - Windows camera bridge sender
 REM
 REM Keep the C922 on native Windows, capture there, and send frames over
 REM TCP to the WSL ROS 2 receiver.

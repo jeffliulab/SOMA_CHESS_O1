@@ -45,7 +45,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 这时先扫一遍：
 
 ```powershell
-cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts\bridge方案
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts\bridge方案
 .\probe_windows_cameras.bat
 ```
 
@@ -81,12 +81,125 @@ cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts\bridge方案
 WSL 接收端现在也改成了“网络读线程持续收包，但 ROS 发布只发布当前最新帧”的模式。  
 如果你前面已经起过 bridge，请把 Windows 发送端和 WSL 接收端都完全重启一次，再看延迟有没有明显下降。
 
+## W1.4 相机参数稳定化怎么做
+
+当前默认路线下，**锁参数要在 Windows sender 这一侧做**，而不是继续依赖旧的 WSL `v4l2-ctl` 脚本。
+
+建议把 W1.4 分成两步：
+
+1. **先调参**：打开 Windows 原生相机设置页，把自动曝光 / 自动白平衡 / 自动对焦关掉，再微调到你满意的画面
+2. **再冻结**：平时启动 bridge 时继续走低延迟 `540p`，并带上 “freeze auto” 配置，保证采集链路尽量稳定
+
+这一步现在对应 `V1.01` 里的：
+
+- `W1.4A`：手动锁参与稳定成像 baseline
+- `W1.4B`：在 baseline 上再挂任务驱动 / 图像质量驱动的自适应控制
+
+### 第一步：打开调参版 sender
+
+```powershell
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts\bridge方案
+.\start_camera_bridge_tuning_540p.bat
+```
+
+这条入口做了几件事：
+
+- 固定用当前这台机器更稳的 `DSHOW + 960x540`
+- 自动应用 `c922_freeze_auto` 配置
+  - 尝试把自动白平衡关掉
+  - 尝试把白平衡温度先拉到 `4000`
+  - 尝试把自动对焦关掉
+  - 在 `DSHOW` 下把自动曝光切到 manual
+- 打开 Windows 原生的 DirectShow 相机设置对话框
+- 启动时把当前可读到的 control 值打到日志里
+
+### 在设置对话框里重点看什么
+
+- Exposure / Auto Exposure
+- White Balance / Auto White Balance
+- Focus / Auto Focus
+
+目标不是一次把所有数字调到“理论最优”，而是先拿到一个**跨 session 不会自己乱飘**的状态：
+
+- 手从画面里进出时，亮度不要明显抽动
+- 棋盘和工作区颜色不要一会儿偏蓝、一会儿偏黄
+- 棋子和桌面边缘在正常工作距离下保持清楚
+
+如果你在窗口里调完了这些项，**建议关掉 sender，再重新启动一次**，这样启动日志里的 control readback 才更接近最终锁住的状态。
+
+### 第二步：日常运行锁参版 sender
+
+```powershell
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts\bridge方案
+.\start_camera_bridge_locked_540p.bat
+```
+
+这条入口不会再主动弹设置框，但会继续：
+
+- 走 `DSHOW + 960x540 + jpeg_quality=70 + drop_stale_grabs=4`
+- 应用 `c922_freeze_auto`
+- 打印当前 control readback
+
+如果后面你想继续微调，也可以直接在这条命令后追加 raw OpenCV 参数，例如：
+
+```powershell
+.\start_camera_bridge_locked_540p.bat --wb-temperature 4200
+.\start_camera_bridge_locked_540p.bat --focus 20
+.\start_camera_bridge_locked_540p.bat --exposure -6
+```
+
+注意：这些数值是 **Windows/OpenCV 的 raw property 值**，不一定和旧的 Linux `v4l2-ctl` 数字一致，所以不要直接照搬 `156 / 4000 / focus_absolute` 那套语义。
+
+### 第三步：可选的自适应 sender
+
+如果 `W1.4A` 已经有一个稳定 baseline，接下来要验证 `W1.4B`，可以直接起：
+
+```powershell
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts\bridge方案
+.\start_camera_bridge_adaptive_540p.bat
+```
+
+这条入口会继续沿用 locked baseline，但额外挂一个 sender 内部的自适应控制器：
+
+- 只动 `exposure / gain / white balance / focus`
+- 默认看固定工作区 ROI 的 `mean luma / overexposed ratio / contrast / sharpness / color cast`
+- 带 `eval interval / cooldown / hysteresis`，避免参数来回振荡
+- 关闭 adaptive 后，行为应当退回和 `start_camera_bridge_locked_540p.bat` 一致
+
+如果后面 perception 稳定了，WSL 侧还可以通过本机 `127.0.0.1:65434` 发一条 newline-delimited JSON 反馈给 sender，字段默认约定为：
+
+```json
+{
+  "timestamp_ms": 1776300845000,
+  "board_visible": true,
+  "board_confidence": 0.82,
+  "corners_detected": 28,
+  "object_confidence": 0.73,
+  "mean_luma": 116.4,
+  "overexposed_ratio": 0.004,
+  "sharpness": 182.0,
+  "requested_mode": "normal"
+}
+```
+
+sender 当前已经能监听这条 feedback 通道；如果没有任何客户端连接，它会继续只靠图像质量指标运行。
+
+### 旧的 `lock_c922_params.sh` 现在怎么用
+
+`scripts/lock_c922_params.sh` 还保留着，但它是给 **旧的 WSL 直通 V4L2 路线** 用的。
+
+在当前默认桥接路线下：
+
+- 它不是主入口
+- 可以当作历史参考
+- 不应该再作为 W1.4 的默认执行路径
+
 ## Windows 侧启动发送端
 
 在 Windows Terminal / PowerShell 里：
 
 ```bat
-cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts\bridge方案
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts\bridge方案
 .\start_camera_bridge.bat
 ```
 
@@ -105,6 +218,9 @@ cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts\bridge方案
 .\start_camera_bridge.bat --backend dshow
 .\start_camera_bridge.bat --width 1920 --height 1080 --fps 30
 .\start_camera_bridge_low_latency_540p.bat
+.\start_camera_bridge_locked_540p.bat
+.\start_camera_bridge_adaptive_540p.bat
+.\start_camera_bridge_tuning_540p.bat
 ```
 
 `start_camera_bridge.bat` 会优先使用这个专用 venv；如果找不到，再 fallback 到系统 `py`。
@@ -112,14 +228,20 @@ cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts\bridge方案
 ## WSL 侧启动 ROS 接收端
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/start_camera_bridge_wsl.sh
 ```
+
+默认情况下，这个 receiver 现在会优先尝试读取：
+
+- `config/calibration/camera_intrinsics.yaml`
+
+如果文件存在而且不再是 `pending_calibration`，`/camera/camera_info` 会直接带上正式内参；如果还没完成标定，它会自动退回占位版相机信息，不会阻塞图像发布。
 
 如果想手动指定 host / port：
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/start_camera_bridge_wsl.sh --host 127.0.0.1 --port 65433
 ```
 

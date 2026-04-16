@@ -1,4 +1,4 @@
-# SOMA Chess O1 — 系统架构与开发环境
+# SOMA Arm — 系统架构与开发环境
 
 > 本文档描述 v1（固定桌面操作器）的系统架构、硬件拓扑和开发环境配置。
 > 决策理由详见 [docs/reference/locked-decisions.md](../reference/locked-decisions.md)。
@@ -125,7 +125,7 @@ sudo apt install -y ros-humble-moveit
 sudo apt install --only-upgrade ros-humble-ompl  # 必须升到 1.7.0，否则 move_group segfault
 
 # Python venv（--system-site-packages 让 venv 能 import 系统 rclpy）
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 pip install lerobot pygame pyserial
@@ -134,7 +134,7 @@ pip install lerobot pygame pyserial
 ```bash
 # ~/.bashrc 添加 srarm 函数
 srarm() {
-  cd ~/SOMA/SOMA_CHESS_O1
+  cd ~/SOMA/soma-arm
   source /opt/ros/humble/setup.bash
   source .venv/bin/activate
   [ -f install/setup.bash ] && source install/setup.bash

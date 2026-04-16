@@ -3,7 +3,7 @@
 [![en](https://img.shields.io/badge/lang-English-blue.svg)](README.md)
 [![zh](https://img.shields.io/badge/lang-中文-red.svg)](README_zh.md)
 
-<h1>SOMA Chess O1</h1>
+<h1>SOMA Arm</h1>
 
 <p>
   <img src="https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white" alt="Python">
@@ -21,7 +21,7 @@
 </p>
 
 <p>
-  <a href="https://github.com/jeffliulab/ANIMA_O1"><img src="https://img.shields.io/badge/Cognitive_Layer-ANIMA_O1-purple" alt="ANIMA_O1"></a>
+  <a href="https://github.com/jeffliulab/anima"><img src="https://img.shields.io/badge/Cognitive_Layer-ANIMA-purple" alt="ANIMA"></a>
 </p>
 
 </div>
@@ -34,7 +34,7 @@
 
 ## Overview
 
-**SOMA Chess O1** is the first open-source version of the SOMA robotic arm series — a language-driven manipulation system built on the [ANIMA](https://github.com/jeffliulab/ANIMA_O1) cognitive framework. A user speaks a natural-language instruction; a Claude-based parser turns it into a structured task spec; open-vocabulary perception (Grounding DINO + SAM2) grounds the language to objects in the scene; an imitation-learning policy (ACT, trained on real teleop demos via LeRobot) executes skill primitives on a 4-DOF arm; and a vision-based validator verifies each step before reporting back.
+**SOMA Arm** is the first open-source version of the SOMA robotic arm series — a language-driven manipulation system built on the [ANIMA](https://github.com/jeffliulab/anima) cognitive framework. A user speaks a natural-language instruction; a Claude-based parser turns it into a structured task spec; open-vocabulary perception (Grounding DINO + SAM2) grounds the language to objects in the scene; an imitation-learning policy (ACT, trained on real teleop demos via LeRobot) executes skill primitives on a 4-DOF arm; and a vision-based validator verifies each step before reporting back.
 
 **v1 goal**: pick and sort two physically distinct object classes — foam sponge cubes (forgiving, for basic grasping) and chess pieces (smaller, demanding precision) — demonstrating that a single cognitive layer can orchestrate different grip strategies for different objects.
 
@@ -96,7 +96,7 @@
        └─────────────────────────────┘
 ```
 
-The four-layer ANIMA architecture (NLU → Planning → Execution → Policy) is robot-agnostic. SOMA Chess O1 provides the skill registry, sensor configuration, and hardware driver; ANIMA handles everything from language understanding to skill dispatch. The same cognitive layer can be reused on other robot embodiments.
+The four-layer ANIMA architecture (NLU → Planning → Execution → Policy) is robot-agnostic. SOMA Arm provides the skill registry, sensor configuration, and hardware driver; ANIMA handles everything from language understanding to skill dispatch. The same cognitive layer can be reused on other robot embodiments.
 
 ---
 
@@ -224,16 +224,20 @@ The test-and-check loop is a signature feature of ANIMA and is rare among LLM-on
 ## Project Structure
 
 ```
-SOMA_CHESS_O1/                   # GitHub repo name
+soma-arm/                        # GitHub repo name
 ├── README.md                    # this file (English)
 ├── README_zh.md                 # Chinese version
 ├── LICENSE                      # Apache-2.0
 ├── CLAUDE.md                    # project conventions for Claude Code
+├── config/
+│   └── calibration/             # shared intrinsics / eye-to-hand / workspace artifacts
 ├── docs/
 │   ├── DEVELOPMENT.md
 │   ├── FAQ-硬件与仿真.md
 │   └── 机械臂技术文档.md        # RoArm-M2-S protocol + ROS 2 interface + safety
 └── src/                         # ROS 2 workspace (colcon build)
+    ├── arm_interfaces/          # ROS 2 service/message definitions
+    ├── arm_perception/          # find_object scaffold + camera feedback bridge
     ├── anima_node/              # ANIMA cognitive layer wrapper
     ├── arm_description/         # URDF + Gazebo verification scene
     ├── arm_driver/              # RoArm-M2-S USB serial driver + MoveIt2 bridge
@@ -250,7 +254,7 @@ SOMA_CHESS_O1/                   # GitHub repo name
 ### Build
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -304,6 +308,50 @@ WSL then publishes and subscribes to:
 
 The usage flow is documented in [docs/Windows_TCP相机桥接.md](docs/Windows_TCP相机桥接.md).
 
+Current V1.01 defaults:
+
+- `config/calibration/camera_intrinsics.yaml` is the shared path for future `/camera/camera_info` intrinsics
+- `config/calibration/eye_to_hand.yaml` and `workspace.yaml` are the single future home for geometry and world-grounding artifacts
+- `scripts\bridge方案\start_camera_bridge_locked_540p.bat` remains the manual-stable baseline
+- `scripts\bridge方案\start_camera_bridge_adaptive_540p.bat` is the quality-driven adaptive sender preset
+
+### Week 1 calibration tooling
+
+```bash
+python3 scripts/calibration/calibrate_camera_charuco.py --help
+python3 scripts/calibration/solve_workspace_calibration.py --help
+python3 scripts/calibration/validate_workspace_reachability.py --help
+```
+
+These scripts now cover the intended `W1.6 / W1.8` flow:
+
+- write `config/calibration/camera_intrinsics.yaml` from saved ChArUco frames
+- solve `eye_to_hand.yaml` plus `workspace.yaml` from one reference image
+- generate and merge a real-arm reachability checklist back into `workspace.yaml`
+
+### Geometry-first perception / world-grounding
+
+```bash
+ros2 launch arm_perception perception.launch.py
+```
+
+This launches the current formal `/find_object` service plus the localhost camera-feedback bridge used by the adaptive Windows sender.
+
+Current behavior:
+
+- `/find_object` reads the shared calibration YAMLs
+- board/workspace queries prefer real chessboard-corner detection
+- bin/container queries use calibrated ROI + contour localization
+- generic piece/object queries use a foreground-blob heuristic inside the calibrated workspace ROI
+- all successful detections return `label / score / pixel / world`
+
+### Unified V1.01 acceptance docs
+
+For the actual Week 1 + Week 2 bring-up and sign-off flow, use:
+
+- `docs/V1.01_Week1_Week2统一测试与验收.md`
+- `docs/V1.01_Week1_Week2测试记录模板.md`
+
 ### Recommended long-term gamepad path (WSL direct attach)
 
 This repo now includes the supporting pieces for the WSL-direct workflow:
@@ -324,14 +372,14 @@ Current shortest working path:
 4. Otherwise run:
 
 ```powershell
-cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\SOMA_CHESS_O1\scripts
+cd \\wsl$\Ubuntu-22.04\home\jeffliu\SOMA\soma-arm\scripts
 .\attach_devices.bat
 ```
 
 5. In WSL run:
 
 ```bash
-cd ~/SOMA/SOMA_CHESS_O1
+cd ~/SOMA/soma-arm
 scripts/start_teleop_wsl_gamepad.sh
 ```
 
@@ -357,11 +405,11 @@ Current default teleop version (locked 2026-04-10):
 
 **Author**: [Jeff Liu Lab](https://jeffliulab.com) — [@jeffliulab](https://github.com/jeffliulab).
 
-**Reusable cognitive layer**. The [ANIMA framework](https://github.com/jeffliulab/ANIMA_O1) is developed as a separate open-source project so it can be reused on other robot embodiments — SOMA Chess O1 is the first reference implementation.
+**Reusable cognitive layer**. The [ANIMA framework](https://github.com/jeffliulab/anima) is developed as a separate open-source project so it can be reused on other robot embodiments — SOMA Arm is the first reference implementation.
 
 **v1 → v2 roadmap**. v1 (this repo, open-source) delivers language-driven pick-and-sort for sponges and chess pieces. v2 (closed-source, future) adds actual chess playing: board state recognition, Stockfish + Claude move planning, physical move execution, and a "universal board game" interface — describe any game's rules in natural language and the robot can play it.
 
-**Long-term vision**. The goal is the SOMA home robot — a household robot that helps with chores and makes everyday life happier. SOMA Chess O1 is the manipulator capability layer; the fixed-station form factor here will eventually be integrated onto a mobile platform.
+**Long-term vision**. The goal is the SOMA home robot — a household robot that helps with chores and makes everyday life happier. SOMA Arm is the manipulator capability layer; the fixed-station form factor here will eventually be integrated onto a mobile platform.
 
 ---
 

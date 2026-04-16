@@ -2,7 +2,7 @@
 setlocal
 
 REM ================================================================
-REM SOMA Chess O1 - Windows native camera ROS publisher
+REM SOMA Arm - Windows native camera ROS publisher
 REM
 REM Recommended camera workflow after 2026-04-10:
 REM   - keep the C922 on native Windows

@@ -26,6 +26,9 @@ except ImportError as exc:  # pragma: no cover - environment-dependent
         f"Original import error: {exc}"
     )
 
+from adaptive_camera import AdaptiveCameraController, add_adaptive_camera_args
+from camera_controls import add_camera_control_args, apply_camera_controls
+
 
 HEADER_STRUCT = struct.Struct("!II")
 
@@ -83,9 +86,16 @@ class CameraBridgeServer:
         self._published_frames = 0
         self._published_frames_since_log = 0
         self._last_runtime_log_monotonic = time.monotonic()
+        self._adaptive_controller = AdaptiveCameraController(
+            args,
+            emit=lambda text: print(text, flush=True),
+        )
+        self._feedback_thread: threading.Thread | None = None
+        self._feedback_stop_event = threading.Event()
 
     def run(self) -> int:
         self._open_capture()
+        self._start_feedback_server()
 
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -112,6 +122,7 @@ class CameraBridgeServer:
             return 0
         finally:
             server.close()
+            self._stop_feedback_server()
             self._release_capture()
 
     def _backend_candidates(self) -> list[BackendCandidate]:
@@ -142,7 +153,7 @@ class CameraBridgeServer:
             deduped.append(candidate)
         return deduped
 
-    def _set_capture_properties(self, capture) -> None:
+    def _set_capture_properties(self, capture, backend_label: str) -> None:
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, float(self._args.width))
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self._args.height))
         capture.set(cv2.CAP_PROP_FPS, float(self._args.fps))
@@ -154,6 +165,14 @@ class CameraBridgeServer:
             capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         elif requested_format == "yuy2":
             capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUY2"))
+
+        apply_camera_controls(
+            capture,
+            cv2,
+            self._args,
+            backend_label,
+            emit=lambda text: print(text, flush=True),
+        )
 
     def _open_capture(self) -> None:
         self._release_capture()
@@ -169,7 +188,7 @@ class CameraBridgeServer:
                     capture.release()
                 continue
 
-            self._set_capture_properties(capture)
+            self._set_capture_properties(capture, candidate.label)
 
             frame = None
             for _ in range(12):
@@ -200,6 +219,14 @@ class CameraBridgeServer:
                 f"actual={width}x{height}@{actual_fps:.2f} format={actual_fourcc}",
                 flush=True,
             )
+            if self._adaptive_controller.enabled:
+                print(
+                    "Adaptive camera control enabled | "
+                    f"mode={self._args.adaptive_mode} roi={self._args.adaptive_roi} "
+                    f"eval_interval_sec={self._args.adaptive_eval_interval_sec:.2f} "
+                    f"cooldown_sec={self._args.adaptive_cooldown_sec:.2f}",
+                    flush=True,
+                )
             return
 
         raise RuntimeError(
@@ -261,6 +288,7 @@ class CameraBridgeServer:
             try:
                 frame = self._capture_once()
                 frame, _, _ = _normalize_frame(frame)
+                self._adaptive_controller.process_frame(self._capture, cv2, frame)
                 capture_time_ns = time.time_ns()
             except Exception:
                 time.sleep(0.01)
@@ -348,6 +376,98 @@ class CameraBridgeServer:
             elapsed = time.perf_counter() - t0
             time.sleep(max(0.0, interval - elapsed))
 
+    def _start_feedback_server(self) -> None:
+        if self._args.adaptive_mode != "hybrid":
+            return
+
+        self._stop_feedback_server()
+        self._feedback_stop_event = threading.Event()
+        self._feedback_thread = threading.Thread(
+            target=self._feedback_loop,
+            name="soma-camera-feedback-listener",
+            daemon=True,
+        )
+        self._feedback_thread.start()
+        print(
+            "Adaptive feedback listening | "
+            f"host={self._args.feedback_host} port={self._args.feedback_port}",
+            flush=True,
+        )
+
+    def _stop_feedback_server(self) -> None:
+        if self._feedback_thread is None:
+            return
+
+        self._feedback_stop_event.set()
+        try:
+            with socket.create_connection(
+                (self._args.feedback_host, self._args.feedback_port),
+                timeout=0.2,
+            ):
+                pass
+        except Exception:
+            pass
+        self._feedback_thread.join(timeout=1.0)
+        self._feedback_thread = None
+
+    def _feedback_loop(self) -> None:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((self._args.feedback_host, self._args.feedback_port))
+        server.listen(1)
+        server.settimeout(0.5)
+
+        try:
+            while not self._feedback_stop_event.is_set():
+                try:
+                    conn, addr = server.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    if self._feedback_stop_event.is_set():
+                        break
+                    raise
+
+                print(f"Adaptive feedback client connected: {addr}", flush=True)
+                with conn:
+                    conn.settimeout(0.5)
+                    self._handle_feedback_connection(conn)
+                print("Adaptive feedback client disconnected", flush=True)
+        finally:
+            server.close()
+
+    def _handle_feedback_connection(self, conn: socket.socket) -> None:
+        buffer = b""
+        while not self._feedback_stop_event.is_set():
+            try:
+                chunk = conn.recv(4096)
+            except socket.timeout:
+                continue
+
+            if not chunk:
+                return
+
+            buffer += chunk
+            while b"\n" in buffer:
+                raw_line, buffer = buffer.split(b"\n", 1)
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line.decode("utf-8"))
+                except json.JSONDecodeError as exc:
+                    print(f"Adaptive feedback parse error: {exc}", flush=True)
+                    continue
+                self._adaptive_controller.update_feedback(payload)
+                print(
+                    "Adaptive feedback | "
+                    f"board_visible={payload.get('board_visible')} "
+                    f"corners={payload.get('corners_detected')} "
+                    f"object_conf={payload.get('object_confidence')} "
+                    f"mode={payload.get('requested_mode', 'normal')}",
+                    flush=True,
+                )
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -379,6 +499,8 @@ def parse_args() -> argparse.Namespace:
         help="Requested local camera pixel format before Windows-side JPEG encoding",
     )
     parser.add_argument("--runtime-log-interval-sec", type=float, default=5.0)
+    add_camera_control_args(parser)
+    add_adaptive_camera_args(parser)
     return parser.parse_args()
 
 

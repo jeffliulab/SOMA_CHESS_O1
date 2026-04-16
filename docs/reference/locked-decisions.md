@@ -1,4 +1,4 @@
-# SOMA Chess O1 — 锁定决策参考
+# SOMA Arm — 锁定决策参考
 
 > 本文档记录 v1 开发中所有已锁定的硬件、软件、战略决策，以及明确废弃的备选方案。
 > 决策锁定日期：2026-04-07（部分更新至 2026-04-16）。
@@ -35,12 +35,12 @@
 | GPU 接入 | **CUDA passthrough** via Windows NVIDIA driver | 用户硬件在双系统 Linux 下 GPU 性能受限；passthrough 保留 RTX 4090 Laptop 100% 性能（2026-04-08 验证 `torch.cuda.is_available()=True`） |
 | USB 接入 | **分路方案**：`usbipd-win` 转发机械臂+手柄；C922 留在 Windows 侧走 TCP bridge | 避免 `usbipd + WSL MJPG` 路径的横向破图问题，不需要 Windows 侧 ROS 2 |
 | ROS 2 | Humble Hawksbill (LTS) | 与 LeRobot 生态最对齐 |
-| Python 环境 | **venv with `--system-site-packages`** at `~/SOMA/SOMA_CHESS_O1/.venv/` | 不用 conda（ROS 2 + conda 有路径/解释器 bug）；`--system-site-packages` 让 venv 能 import 系统 `rclpy` |
+| Python 环境 | **venv with `--system-site-packages`** at `~/SOMA/soma-arm/.venv/` | 不用 conda（ROS 2 + conda 有路径/解释器 bug）；`--system-site-packages` 让 venv 能 import 系统 `rclpy` |
 | 模仿学习 | **LeRobot + ACT** | HuggingFace 生态，数据集发布到 HF Hub |
 | 认知层 | **ANIMA**（LLM-as-Parser, py_trees BT, test-and-check validator） | 项目差异化核心；使用 Claude API |
 | 感知 | **Grounding DINO + SAM2**（open-vocab, pretrained） | 零样本，v1 不做感知模型训练 |
 | 运动规划 | **MoveIt2**（4-DOF, IKFast/BioIK） | 硬编码原语安全网 |
-| ANIMA 位置 | **独立 Python 库** `~/SOMA/ANIMA_O1/`，`pip install -e` 接入 | 不是 SOMA_CHESS_O1 的子文件夹；保持机器人无关性；两个 repo = 更强的 portfolio 叙事 |
+| ANIMA 位置 | **独立 Python 库** `~/SOMA/anima/`，`pip install -e` 接入 | 不是 soma-arm 的子文件夹；保持机器人无关性；两个 repo = 更强的 portfolio 叙事 |
 
 ---
 
@@ -91,7 +91,7 @@ Tier 4 是项目核心差异化卖点——业内几乎没有 LLM-robot demo 在
 
 | 项目 | 决定 | 理由 |
 |---|---|---|
-| 框架位置 | `~/SOMA/ANIMA_O1/` 内作为子模块 | ANIMA 保持机器人无关性；引擎是认知层的一部分 |
+| 框架位置 | `~/SOMA/anima/` 内作为子模块 | ANIMA 保持机器人无关性；引擎是认知层的一部分 |
 | 接口抽象 | `GameEngine.legal_moves(board_state) → List[Move]` | ANIMA 不关心具体棋类规则，只调用引擎接口 |
 | 第一个插件 | 国际象棋（可用 python-chess 库） | 项目名就叫 Chess O1 |
 | 可扩展性 | 每种棋类一个 engine 插件（围棋/中国象棋/将棋/麻将等） | 用户长期愿景：通用桌游机器人 |
@@ -107,7 +107,7 @@ Tier 4 是项目核心差异化卖点——业内几乎没有 LLM-robot demo 在
 | 仿真使用 | **Gazebo 仅 URDF 验证 + ANIMA dry-run** | 不用于 ML 训练；ACT 只训真机 teleop 数据 |
 | 训练方式 | **真机 teleop only** | 无 sim2real，无 RL，无 VLA fine-tuning（v1） |
 | v1/v2 边界 | v1（本仓库）= 棋子吃子（识别+规则+执行）；v2 = 完整对弈 + 多棋类 | v1 不需要完整对弈；v2 加 Stockfish/Claude 选最优走法 |
-| ANIMA 位置 | 独立子模块 `~/SOMA/ANIMA_O1/` | 保持机器人无关性，两个公开 repo = 更强 portfolio 叙事 |
+| ANIMA 位置 | 独立子模块 `~/SOMA/anima/` | 保持机器人无关性，两个公开 repo = 更强 portfolio 叙事 |
 
 ---
 
@@ -126,7 +126,7 @@ Tier 4 是项目核心差异化卖点——业内几乎没有 LLM-robot demo 在
 | ~~强化学习~~ | ACT/IL 路线不用 RL |
 | ~~自定义感知模型训练~~ | Grounding DINO + SAM2 零样本，v1 不训感知模型 |
 | ~~Gazebo mobile manipulation 仿真~~ | v1 sprint 时间紧，仿真不出现在 demo 视频 |
-| ~~ANIMA 放进 SOMA_CHESS_O1 子文件夹~~ | 破坏框架的机器人无关性 |
+| ~~ANIMA 放进 soma-arm 子文件夹~~ | 破坏框架的机器人无关性 |
 
 ---
 
