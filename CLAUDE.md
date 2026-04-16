@@ -1,257 +1,99 @@
-# SOMA Chess O1 — Project conventions
+# SOMA Chess O1 — 项目指南针
 
-> This file is read by Claude Code at the start of every conversation. Keep it accurate and concise.
+> 本文件是 Claude Code 的导航索引。内容保持简洁；细节请查阅下方对应文档。
 
-## What this project is
+---
 
-**SOMA Chess O1** is the first open-source version of the SOMA robotic arm series — a fixed tabletop manipulator powered by natural language. The user speaks an instruction, the [ANIMA](https://github.com/jeffliulab/ANIMA_O1) cognitive layer parses it via Claude API into a structured task spec, perception (Grounding DINO + SAM2) grounds language to world coordinates, a py_trees behavior tree dispatches ACT-trained skill primitives, and a test-and-check validator confirms success or triggers recovery.
+## 项目简介
 
-**v1 goal (this repo, open-source, Apache-2.0)**: pick-and-sort two object classes — foam sponge cubes and chess pieces — into a bin, driven by natural language, with error detection and retry.
+**SOMA Chess O1** — 语言驱动的固定桌面操作器，v1 目标：用自然语言命令将海绵块和棋子分拣入容器。认知层 ANIMA（Claude API + py_trees）解析指令，Grounding DINO + SAM2 做视觉定位，ACT（LeRobot）执行物理动作，validator 做 test-and-check 闭环。Apache-2.0，Jeff Liu Lab。
 
-**v2 goal (separate private repo, future)**: actual chess playing — board state recognition, Stockfish + Claude move planning, physical move execution, and a "universal board game" interface where describing any game's rules in natural language is enough to play it.
+**当前版本**: V1.01（相机稳定化 / eye-to-hand 标定 / world grounding）  
+**任务清单**: [`开发进度与待办事项.md`](开发进度与待办事项.md)
 
-This is a **portfolio / job-hunting project**, public Apache-2.0, written by Jeff Liu Lab. Optimize all decisions for **legibility to a hiring manager in the embodied AI / robotics space**, not for academic novelty or production hardening.
+---
 
-## Repo lineage and current scope
-
-- **Migrated from** [`soma_home_exp_v1`](https://github.com/jeffliulab/soma_home_exp_v1) (now archived) on 2026-04-07. ANIMA nodes, URDF, launch files, and the 8-week sprint plan all came from there.
-- **Cognitive framework dependency**: [`ANIMA_O1`](https://github.com/jeffliulab/ANIMA_O1) — separate Python framework repo. SOMA Chess O1 wraps ANIMA in ROS 2 nodes.
-- **Long-term design context**: lives in `SOMA_HOME_EXP/` and `ANIMA_FRAMEWORK/` design folders (private monorepo, not public). Some of those documents are STALE because they predate the pivot — check `SOMA_HOME_EXP/CLAUDE.md` for which files are current.
-- **Earlier commit on this repo** is unrelated SO-ARM100 + LEAP Hand + MediaPipe exploration that was rebuilt from scratch. Don't reference any of it.
-
-## Single source of truth for v1 execution
-
-[`开发进度与待办事项.md`](开发进度与待办事项.md) is the **single source of truth** for the 8-week sprint plan. Always check it before recommending tasks. Update its progress tracker after completing meaningful work.
-
-## Hardware (locked 2026-04-07)
-
-- **Arm**: Waveshare RoArm-M2-S — 4-DOF, USB serial via CP2102N, ESP32 + ST3215 servos, ~280mm reach, ~500g payload, ~826g
-- **Camera**: Logitech C922 Pro Stream Webcam — USB UVC, fixed overhead
-- **Teleop input**: PDP Wired Controller for Xbox — XInput, user already owns. Do not trust any old recorded busid for it; always confirm the current busid with `usbipd list` before advising attach commands.
-- **Compute**: Workstation laptop, **RTX 4090 Laptop GPU (16 GB VRAM)** — note: NOT the desktop 24 GB variant; this was misdocumented earlier
-- **No Pi 5, no mobile base, no LiDAR in v1** — everything plugs directly into the host PC
-- **Object set v1**: yellow/green dual-sided sponge cubes (~4-5cm) + chess pieces (pawns and rooks primary; mixed types for demo) + green-rim white-interior plastic bin
-
-## Development environment (locked 2026-04-07)
-
-- **Host**: Windows 11 (user's primary OS, GPU known to perform at full capacity here)
-- **Dev**: WSL2 + Ubuntu 22.04 — chosen over dual-boot Linux because the user's hardware suffers GPU performance loss on dual-boot. WSL2 + CUDA passthrough preserves full RTX 4090 Laptop performance.
-- **Python venv**: `~/SOMA/SOMA_CHESS_O1/.venv/`, created with `python3 -m venv --system-site-packages .venv`. The `--system-site-packages` flag is **mandatory** so the venv can import the system `rclpy` from `/opt/ros/humble/...`. LeRobot, pygame, pyserial, torch (with CUDA) are installed inside this venv.
-- **USB**: Long-term recommended path is now split: `usbipd-win` forwards the RoArm and Xbox gamepad into WSL2 as `/dev/ttyUSB*` and `/dev/input/event*`, while the Logitech C922 stays on native Windows and streams into WSL over a lightweight TCP camera bridge. Busids on this machine are not stable across replug / reboot / topology changes, so the first step before any attach guidance is always `usbipd list`. Do not trust stale busids from old logs or screenshots. The WSL-direct gamepad path requires a custom WSL kernel with `JOYDEV + XPAD`; see [docs/WSL_Xbox手柄直通.md](docs/WSL_Xbox手柄直通.md), [docs/Windows_TCP相机桥接.md](docs/Windows_TCP相机桥接.md), and [scripts/attach_devices.bat](scripts/attach_devices.bat). The Windows TCP bridge remains a fallback only.
-- **ROS 2**: Humble Hawksbill (LTS, best LeRobot compat). MoveIt2 installed via `apt install ros-humble-moveit`. Note: must `apt install --only-upgrade ros-humble-ompl` to get OMPL 1.7.0+ (provides `libompl.so.18`), otherwise `move_group` segfaults — known ROS Humble apt packaging mismatch.
-- **Graphics**: WSLg (Gazebo / RViz2 work but slower — fine since they're not the bottleneck)
-- **Shell helper**: `srarm` function in `~/.bashrc` — one command to enter dev mode (cd into workspace + source ROS 2 + activate venv + source overlay)
-- **External upstream workspaces**: `~/SOMA/DRIVERS/roarm_ws_em0/` (Waveshare's ROS 2 + MoveIt2 config, only for the MoveIt2 mock+sidecar mode). Kept outside this repo and outside any git tracking. **Do not vendor third-party code into this repo** — license risk on a public Apache-2.0 portfolio repo.
-
-## Repository structure
-
-```
-SOMA_CHESS_O1/
-├── README.md, LICENSE, CLAUDE.md, .gitignore
-├── 开发进度与待办事项.md     # 8-week sprint plan (source of truth, gitignored as private)
-├── .venv/                   # Python venv (gitignored), --system-site-packages
-├── docs/
-│   ├── DEVELOPMENT.md
-│   ├── FAQ-硬件与仿真.md
-│   ├── Windows_TCP相机桥接.md
-│   ├── Windows_ROS相机桥接.md
-│   └── 机械臂技术文档.md   # RoArm-M2-S 协议 + ROS 2 接口 + 安全操作(W1.5 产物)
-├── scripts/
-│   ├── attach_devices.bat   # Windows-side usbipd attach script (RoArm + gamepad direct to WSL)
-│   ├── build_wsl_gamepad_kernel.sh
-│   ├── check_wsl_gamepad_support.sh
-│   ├── start_camera_bridge_wsl.sh
-│   ├── start_teleop_wsl_gamepad.sh
-│   └── bridge方案/
-│       ├── attach_devices_bridge_mode.bat
-│       ├── bridge_gui.py, bridge_worker.py
-│       ├── gamepad_bridge.py, start_bridge.bat
-│       ├── start_camera_bridge.bat, windows_camera_bridge.py
-│       ├── camera_bridge_receiver.py
-│       └── start_camera_ros_publisher.bat, windows_camera_ros_publisher.py
-└── src/                     # ROS 2 workspace, build with colcon
-    ├── anima_node/          # ANIMA cognitive layer ROS 2 wrapper (legacy from soma_home_exp_v1)
-    ├── arm_description/     # URDF + Gazebo verification scene
-    ├── arm_bringup/         # Top-level launch
-    ├── arm_driver/          # ★ W1.5: RoArm-M2-S USB serial driver
-    │                        #   - roarm_protocol.py     pure Python protocol layer
-    │                        #   - arm_driver_node       /joint_command + /joint_states + /gripper_command
-    │                        #   - moveit_bridge_node    bridges MoveIt2 mock joint_states to real serial
-    │                        #   - probe                 standalone CLI for protocol smoke test
-    └── arm_teleop/          # ★ W1.7: PDP Xbox gamepad teleoperation
-        ├── gamepad_input.py      unified GamepadState + evdev/tcp_bridge/pygame backends
-        ├── control_filters.py    teleop-side filters (left-stick axis lock, optional smoothing)
-        └── gamepad_teleop_node   default = WSL-direct evdev, publishes /joint_command or /gripper_command
-```
-
-ROS 2 packages added later in the sprint (W2-W3):
-- `arm_perception/` — Grounding DINO + SAM2
-- `arm_manipulation/` — MoveIt2 config + hardcoded primitives (we'll generate our own MoveIt2 config to replace the borrowed Waveshare one)
-
-## Conventions
-
-- **Language**: docs and comments are mostly Chinese (Simplified). Code, ROS package names, identifiers, and config keys stay in English. The 开发进度与待办事项.md follows this convention.
-- **License headers**: not added to every source file in v1. The repo-level LICENSE is sufficient until we tag a release.
-- **Naming**: ROS packages have NO `soma_` prefix anymore. They use `anima_node`, `arm_description`, `arm_bringup`, etc.
-- **Author / copyright**: always **"Jeff Liu Lab"** (jeffliulab.com, GitHub @jeffliulab). Don't drop the "Lab" suffix.
-- **Don't over-engineer**: this is pre-alpha. No CI, no packaging, no contribution guides, no code-of-conduct. Add them when there's a real reason.
-- **Dev log sync**: after each meaningful SOMA Chess O1 work session, update the parent-repo log at `~/SOMA/开发日志/SOMA_CHESS_O1/V1.01-开发日志.md`. `V1.00` is now archived; new work should go into the current small-version log. Use a readable daily-work-journal style in Chinese: under each date, start with one natural summary sentence, then write `今天做了什么`, `解决了什么问题`, `发现了什么问题`, and only add `下一步` when the next action is already clear from the real project state. Write like I am recording my own work, but keep the tone natural instead of repeatedly emphasizing “我”. Do not write as an observer saying what "the user" did. If the default workflow or common commands changed, also update `~/SOMA/常用命令.md`.
-
-## Common commands
+## 快速启动
 
 ```bash
-# Enter dev mode (defined in ~/.bashrc)
-srarm
+srarm   # 进入 dev 模式（cd workspace + source ROS 2 + activate .venv + source overlay）
 
-# Build
+# 机械臂遥操（当前默认）
+scripts/start_teleop_wsl_gamepad.sh
+
+# 相机 bridge（当前默认）
+# Windows: scripts\bridge方案\start_camera_bridge.bat
+# WSL:     scripts/start_camera_bridge_wsl.sh
+
+# 构建
 colcon build --symlink-install
-# (already sourced by srarm if install/ exists)
-
-# ---------- arm hardware ----------
-
-# Standalone protocol probe (no ROS — sanity check serial + read 1 state)
-python -m arm_driver.roarm_protocol            # default /dev/ttyUSB0
-python -m arm_driver.roarm_protocol /dev/ttyACM0
-
-# Mode A: direct ROS 2 driver (use this for our own teleop / direct command pipeline)
-ros2 launch arm_driver arm_driver.launch.py
-# In another shell:
-ros2 topic echo /joint_states --once
-ros2 topic pub --once /joint_command sensor_msgs/msg/JointState \
-  '{name: ["base_link_to_link1","link1_to_link2","link2_to_link3","link3_to_gripper_link"],
-    position: [0.0, 0.0, 1.5708, 0.75]}'
-ros2 topic pub --once /gripper_command std_msgs/msg/Float32 '{data: 1.5}'  # open
-ros2 topic pub --once /gripper_command std_msgs/msg/Float32 '{data: 0.0}'  # close
-
-# Mode B: gamepad teleop (preferred current workflow: WSL-direct + evdev)
-scripts/start_teleop_wsl_gamepad.sh
-# Equivalent lower-level form:
-ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false
-
-# Optional comparison mode: same teleop, but enable gentle motion smoothing
-ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false enable_motion_smoothing:=true
-
-# Fallback mode: keep the controller on Windows and bridge over TCP
-ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=true
-
-# Mode C: MoveIt2 + RViz drag-the-orange-ball (uses upstream Waveshare config)
-# Terminal A:
-source ~/SOMA/DRIVERS/roarm_ws_em0/install/setup.bash
-ros2 launch roarm_moveit interact.launch.py
-# Terminal B:
-srarm
-ros2 run arm_driver moveit_bridge_node
-
-# ⚠ Modes A / B / C are mutually exclusive — only one process at a time can hold /dev/ttyUSB*.
-
-# ---------- visualization ----------
-ros2 launch arm_description display.launch.py        # URDF in RViz only
-
-# ---------- USB device forwarding (Windows PowerShell, after each Windows reboot) ----------
-usbipd list                         # always check current busid first
-usbipd attach --wsl --busid <ROARM_BUSID>
-usbipd attach --wsl --busid <PDP_BUSID>
-# Do not attach the C922 here in the normal workflow.
-# Keep the camera on Windows and run scripts\bridge方案\start_camera_bridge.bat there.
-# Or just double-click scripts/attach_devices.bat from the Windows desktop for arm + gamepad only.
-# Never trust old recorded busids without checking usbipd list again first.
 ```
 
-## Teleop startup flow (agent-facing default)
+---
 
-This is the standard operator path and should be the first thing an agent recommends for arm teleop:
+## 文档导航
 
-1. Windows Administrator PowerShell: run `usbipd list`
-2. Confirm the RoArm serial bridge and Xbox controller busids for the current boot
-3. If both devices are already `Attached`, that step is already successful; do not re-attach just because the script previously printed an error
-4. Otherwise run `scripts\\attach_devices.bat`
-5. In WSL:
+| 想查什么 | 文件路径 |
+|---|---|
+| 硬件 / 软件 / 战略决策（已锁定）| [docs/reference/locked-decisions.md](docs/reference/locked-decisions.md) |
+| 机械臂协议 + ROS 2 接口 + 安全操作 | [docs/reference/机械臂技术文档.md](docs/reference/机械臂技术文档.md) |
+| 硬件与仿真 FAQ | [docs/reference/FAQ-硬件与仿真.md](docs/reference/FAQ-硬件与仿真.md) |
+| 相机 bridge 操作（当前方案）| [docs/setup/Windows_TCP相机桥接.md](docs/setup/Windows_TCP相机桥接.md) |
+| 手柄遥操 / 自定义 WSL 内核 | [docs/setup/WSL_Xbox手柄直通.md](docs/setup/WSL_Xbox手柄直通.md) |
+| 开发环境搭建（完整步骤）| [docs/setup/DEVELOPMENT.md](docs/setup/DEVELOPMENT.md) |
+| V1.01 验收标准 | [docs/testing/V1.01_验收清单.md](docs/testing/V1.01_验收清单.md) |
+| V1.01 测试记录模板 | [docs/testing/V1.01_测试记录模板.md](docs/testing/V1.01_测试记录模板.md) |
+| 旧 Windows ROS bridge（已废弃）| [docs/legacy/Windows_ROS相机桥接.md](docs/legacy/Windows_ROS相机桥接.md) |
+| 全部常用命令 | [~/SOMA/常用命令.md](../常用命令.md) |
+| 当前任务清单 | [开发进度与待办事项.md](开发进度与待办事项.md) |
 
-```bash
-cd ~/SOMA/SOMA_CHESS_O1
-scripts/start_teleop_wsl_gamepad.sh
-```
+---
 
-6. Wait for:
-   - `Connected to RoArm-M2-S`
-   - `Opened evdev gamepad`
-   - `Teleop target initialized from current /joint_states.`
-7. Press `Start` once
-8. Confirm `Start pressed — re-enabled, going home`
-9. Then begin stick motion
+## 遥操默认流程（agent 关键路径）
 
-Two common operator mistakes to avoid:
+1. Windows 管理员 PowerShell: `usbipd list` — **每次重启都要先查 busid**
+2. 确认 RoArm 串口和 Xbox busid（busid 每次重启都可能变）
+3. 若设备已 `Attached` 则无需再 attach；否则运行 `scripts\attach_devices.bat`
+4. WSL: `scripts/start_teleop_wsl_gamepad.sh`
+5. 等待 `Teleop target initialized from current /joint_states.`
+6. 按 `Start`，确认 `Start pressed — re-enabled, going home`
+7. 然后才移动摇杆
 
-- `Attached` is not an error; it means the device is already in WSL
-- `\\wsl$\\...` paths are Windows-only; in WSL always use `~/SOMA/...`
+**常见误区**: `Attached` 不是错误；`\\wsl$\...` 路径只在 Windows Shell 有效，WSL 里用 `~/SOMA/...`
 
-## Current teleop default (locked 2026-04-10)
+---
 
-- **Default operator-facing path**: `scripts/start_teleop_wsl_gamepad.sh`
-- **Default backend**: `evdev` on `/dev/input/event*`
-- **Current control semantics**:
-  - left stick X/Y = base / shoulder
-  - right stick Y = elbow
-  - LB/RB = gripper close
-  - LT/RT = gripper open
-  - Start = home + re-enable
-  - Back = e-stop
-  - DPAD left/right = LED
-- **Important filters / behavior**:
-  - left stick uses a hard single-axis lock to suppress physical cross-axis bleed
-  - motion smoothing is **off by default**; stick magnitude maps directly to joint speed
-  - pure gripper teleop uses `/gripper_command`, and the driver sends dedicated protocol `T:106` instead of resending full-body `T:102`
-- **Known current state**:
-  - system is now usable and should be treated as the default version
-  - remaining issue is minor body micro-jitter during arm motion; do not revert the current direct stick-to-velocity semantics without a good reason
+## 相机默认路径（locked 2026-04-10）
 
-## Teleop fallback matrix
+- Windows: `scripts\bridge方案\start_camera_bridge.bat`
+- WSL: `scripts/start_camera_bridge_wsl.sh`
+- 发布 `/camera/image_raw` + `/camera/camera_info`（1280×720 @ 30fps，bridge host `127.0.0.1:65433`）
+- C922 **不走** usbipd；保留在 Windows 侧通过 TCP bridge 传图
 
-- **Primary**: `scripts/start_teleop_wsl_gamepad.sh`
-- **Direct WSL + smoothing on**:
-  - `ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=false enable_motion_smoothing:=true`
-- **Windows bridge fallback**:
-  - Windows: `scripts\\bridge方案\\attach_devices_bridge_mode.bat`
-  - Windows: `scripts\\bridge方案\\bridge_gui.py`
-  - WSL: `ros2 launch arm_teleop teleop.launch.py use_tcp_bridge:=true`
+---
 
-## Current camera default (locked 2026-04-10)
+## v1 不做的事（DO NOT LIST）
 
-- **Default operator-facing path**:
-  - Windows: `scripts\\bridge方案\\start_camera_bridge.bat`
-  - WSL: `scripts/start_camera_bridge_wsl.sh`
-- **Published ROS topics**:
-  - `/camera/image_raw`
-  - `/camera/camera_info`
-- **Current defaults**:
-  - `device_index=0`
-  - `1280x720 @ 30fps`
-  - `frame_id=camera_optical_frame`
-  - bridge host / port = `127.0.0.1:65433`
-  - backend preference = `MSMF`, fallback = `DSHOW`
-  - requested local capture format = `MJPG`, JPEG-encoded on Windows, decoded and republished in WSL
-- **Important note**:
-  - `arm_bringup camera_usb.launch.py` is now kept only as a reference / debugging path for the old WSL-direct camera route
+遇到以下建议请礼貌推回——它们是 v2+ 范围，会偏离当前 sprint：
 
-## What NOT to do (deliberately scoped out of v1)
+- ❌ 移动底盘 / Nav2 / SLAM（真机）
+- ❌ 衣物 / 柔性物体 / 力反馈 / 双臂
+- ❌ MuJoCo / Isaac Sim / Isaac Lab（不用于 ML 训练）
+- ❌ sim2real（只用真机 teleop 数据训练 ACT）
+- ❌ 强化学习 / VLA fine-tuning（week 8 stretch 才考虑）
+- ❌ 自定义感知模型训练（Grounding DINO + SAM2 零样本）
+- ❌ Pi 5 嵌入式部署（v1 全部直插 PC）
+- ❌ 下棋功能（board state → legal move → execute）— v2 私有仓库
 
-When recommending features or tasks, push back if any of these come up — they are v2+ and would derail the 8-week sprint:
+---
 
-- ❌ Mobile manipulation on real hardware (Gazebo dry-run is allowed)
-- ❌ Garment / cloth / cable / deformable object handling
-- ❌ Bimanual / force feedback / 6-DOF arm
-- ❌ Custom base / Nav2 / SLAM on real hardware
-- ❌ Multi-machine ROS 2 DDS (everything is single PC)
-- ❌ Pi 5 embedded deployment
-- ❌ MuJoCo / Isaac Sim / Isaac Lab
-- ❌ Sim2real transfer (real robot data only)
-- ❌ Reinforcement learning of any kind
-- ❌ Custom perception model training (Grounding DINO + SAM2 are pretrained)
-- ❌ VLA fine-tuning (Week 8 stretch only)
-- ❌ Actual chess playing (board state → legal move → physical move execution) — this is **v2**, in a separate private repo
+## 开发约定
 
-If the user wants to do any of these, treat it as a scope change worth discussing — don't silently agree.
+- **语言**: 代码 / ROS 包名 / commit 消息：英文；文档 / 注释 / 对话：中文（技术术语保留英文）
+- **署名**: 始终用 **Jeff Liu Lab**（不省略 "Lab"）；jeffliulab.com，GitHub @jeffliulab
+- **pre-alpha**: 不加 CI、packaging、contribution guide — 增加复杂度时须有真实理由
+- **开发日志**: 每次有意义的工作后更新 `~/SOMA/docs/logs/SOMA_CHESS_O1/V1.01-开发日志.md`
+- **常用命令**: 工作流或启动方式有变化时同步更新 `~/SOMA/常用命令.md`
+- **外部上游代码**: 不要 vendor 进本 repo（license 隔离）；放在 `~/SOMA/DRIVERS/`
 
-## License
-
-[Apache-2.0](LICENSE), Copyright 2026 Jeff Liu Lab.
+**License**: Apache-2.0, Copyright 2026 Jeff Liu Lab.
